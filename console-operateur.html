@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Téranga Mobility — Console opérateur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink:#16201f; --muted:#5d6b68; --faint:#8a948f;
+    --primary:#0e6e5c; --primary-dark:#0a4a3e; --primary-tint:#e3efeb;
+    --accent:#c87f1c; --accent-tint:#f7ecd8;
+    --bg:#eaeeec; --card:#fff; --line:#dde3e0; --line-soft:#e8ece9;
+    --shadow:0 1px 2px rgba(16,32,31,.04),0 8px 24px rgba(16,32,31,.06);
+    --radius:14px; --radius-sm:9px;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body { font-family:'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg); color:var(--ink); font-size:15px; line-height:1.45; -webkit-font-smoothing:antialiased; }
+  .topbar { display:flex; align-items:center; gap:16px; padding:14px 24px; background:var(--primary-dark); color:#eaf3f0; position:sticky; top:0; z-index:20; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo { width:38px; height:38px; border-radius:10px; background:linear-gradient(150deg,var(--primary),#13937a); display:grid; place-items:center; flex:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); }
+  .brand-text { display:flex; flex-direction:column; line-height:1.1; }
+  .brand-name { font-weight:800; font-size:16px; letter-spacing:-.01em; }
+  .brand-eyebrow { font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:#8fc4b7; font-weight:600; margin-top:2px; }
+  .topbar-right { margin-left:auto; display:flex; align-items:center; gap:18px; }
+  .clock { font-size:13px; color:#b9d6ce; font-variant-numeric:tabular-nums; text-align:right; }
+  .clock strong { color:#eaf3f0; font-weight:600; }
+  .status { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; padding:6px 11px; border-radius:999px; background:rgba(255,255,255,.08); }
+  .status .dot { width:8px; height:8px; border-radius:50%; background:var(--faint); }
+  .status.ok .dot { background:#3ad29f; box-shadow:0 0 0 3px rgba(58,210,159,.22); }
+  .status.down .dot { background:#ff7a6b; box-shadow:0 0 0 3px rgba(255,122,107,.22); }
+
+  .wrap { max-width:1180px; margin:0 auto; padding:24px; display:grid; grid-template-columns:1.55fr 1fr; gap:22px; align-items:start; }
+  @media (max-width:900px){ .wrap{ grid-template-columns:1fr; } }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+  .panel-head { padding:16px 20px; border-bottom:1px solid var(--line-soft); display:flex; align-items:baseline; gap:10px; }
+  .panel-head h2 { margin:0; font-size:16px; font-weight:700; letter-spacing:-.01em; }
+  .panel-head .hint { font-size:12.5px; color:var(--faint); }
+  .panel-body { padding:20px; }
+
+  .section+.section { margin-top:22px; padding-top:20px; border-top:1px dashed var(--line); }
+  .section-label { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--primary); font-weight:700; margin:0 0 14px; display:flex; align-items:center; gap:8px; }
+  .section-label .num { width:18px; height:18px; border-radius:5px; background:var(--primary-tint); color:var(--primary-dark); display:grid; place-items:center; font-size:11px; font-weight:800; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid .full { grid-column:1/-1; }
+  @media (max-width:560px){ .grid{ grid-template-columns:1fr; } }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  .field label { font-size:12.5px; font-weight:600; color:var(--muted); }
+  .field label .req { color:var(--accent); }
+  .field .help { font-size:11.5px; color:var(--faint); }
+  input,select,textarea { font:inherit; color:var(--ink); background:#fbfcfb; border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px 12px; width:100%; transition:border-color .12s,box-shadow .12s; }
+  textarea { resize:vertical; min-height:56px; }
+  input:focus,select:focus,textarea:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px rgba(14,110,92,.14); background:#fff; }
+  .check { display:flex; align-items:flex-start; gap:10px; cursor:pointer; padding:11px 12px; border:1px solid var(--line); border-radius:var(--radius-sm); background:#fbfcfb; transition:border-color .12s; }
+  .check:hover { border-color:#c5cfcb; }
+  .check input { width:18px; height:18px; margin:1px 0 0; accent-color:var(--primary); flex:none; }
+  .check .ct { font-size:13px; }
+  .check .ct b { display:block; color:var(--ink); font-weight:600; }
+  .check .ct span { color:var(--faint); font-size:12px; }
+  .check.locked { opacity:.7; }
+
+  .seg { display:inline-flex; background:#eef2f0; border:1px solid var(--line); border-radius:999px; padding:3px; gap:2px; }
+  .seg button { font:inherit; font-size:13px; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--muted); padding:7px 16px; border-radius:999px; transition:background .12s,color .12s; }
+  .seg button.active { background:var(--primary); color:#fff; }
+  .hidden { display:none !important; }
+
+  .quote { margin-top:22px; border:1px solid var(--line); border-radius:var(--radius); background:linear-gradient(180deg,#fcfbf8,#fff 60%); overflow:hidden; }
+  .quote-head { padding:12px 18px; border-bottom:1px solid var(--line-soft); font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--accent); font-weight:700; display:flex; justify-content:space-between; }
+  .quote-mode { color:var(--primary-dark); background:var(--primary-tint); border-radius:999px; padding:1px 9px; letter-spacing:.04em; }
+  .quote-body { padding:16px 18px; }
+  .quote-empty { color:var(--faint); font-size:13.5px; padding:6px 0; }
+  .qline { display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; font-size:14px; }
+  .qline .lbl { color:var(--muted); }
+  .qline .amt { font-variant-numeric:tabular-nums; font-weight:600; }
+  .qtotal { margin-top:10px; padding-top:14px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:baseline; }
+  .qtotal .lbl { font-weight:700; font-size:14px; }
+  .qtotal .amt { font-size:28px; font-weight:800; letter-spacing:-.02em; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .qtotal .amt small { font-size:14px; font-weight:700; color:var(--accent); margin-left:3px; }
+  .qsplit { margin-top:12px; padding:10px 12px; border-radius:var(--radius-sm); background:var(--primary-tint); color:var(--primary-dark); font-size:12.5px; display:flex; justify-content:space-between; gap:10px; font-variant-numeric:tabular-nums; }
+  .updating { animation:pulse .35s ease; }
+  @keyframes pulse { from{ background:var(--accent-tint); } to{ background:transparent; } }
+
+  .actions { margin-top:20px; display:flex; align-items:center; gap:14px; }
+  .btn { font:inherit; font-weight:700; cursor:pointer; background:var(--primary); color:#fff; border:none; padding:13px 22px; border-radius:var(--radius-sm); transition:background .14s,transform .05s; }
+  .btn:hover { background:var(--primary-dark); }
+  .btn:active { transform:translateY(1px); }
+  .btn:disabled { background:#a9b7b2; cursor:not-allowed; }
+  .formmsg { font-size:13.5px; font-weight:600; }
+  .formmsg.ok { color:var(--primary); }
+  .formmsg.err { color:#c0392b; }
+
+  .queue-tools { display:flex; align-items:center; gap:8px; margin-left:auto; }
+  .iconbtn { font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; background:var(--primary-tint); color:var(--primary-dark); border:none; padding:7px 12px; border-radius:999px; }
+  .iconbtn:hover { background:#d3e6e0; }
+  .queue { display:flex; flex-direction:column; }
+  .qcard { padding:14px 20px; border-bottom:1px solid var(--line-soft); }
+  .qcard:last-child { border-bottom:none; }
+  .qcard-top { display:flex; align-items:center; gap:8px; margin-bottom:5px; flex-wrap:wrap; }
+  .ref { font-weight:800; font-size:13px; letter-spacing:.02em; color:var(--primary-dark); }
+  .badge { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:3px 8px; border-radius:999px; margin-left:auto; }
+  .b-PENDING{background:#fbedd3;color:#9a6a12;} .b-CONFIRMED{background:var(--primary-tint);color:var(--primary-dark);}
+  .b-ASSIGNED{background:#dbe7fb;color:#1d4ed8;} .b-EN_ROUTE,.b-IN_PROGRESS{background:#e2defb;color:#5b21b6;}
+  .b-COMPLETED{background:#d6efdd;color:#166534;} .b-CANCELLED,.b-NO_SHOW{background:#f7dcd8;color:#b3261e;}
+  .tag { font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:999px; }
+  .tag-now { background:#fde4e1; color:#b3261e; }
+  .tag-need { background:var(--primary-tint); color:var(--primary-dark); }
+  .qcard .who { font-weight:600; font-size:14px; }
+  .qcard .route { font-size:12.5px; color:var(--ink); margin-top:3px; }
+  .qcard .route .arrow { color:var(--faint); margin:0 5px; }
+  .qcard .meta { font-size:12px; color:var(--muted); margin-top:3px; display:flex; flex-wrap:wrap; gap:3px 10px; }
+  .qcard .price { font-weight:700; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .empty { padding:34px 20px; text-align:center; color:var(--faint); font-size:13.5px; }
+  .empty.err { color:#c0392b; }
+  .assign { margin-top:9px; }
+  .assignbtn { font:inherit; font-size:12px; font-weight:700; cursor:pointer; color:var(--primary-dark); background:var(--primary-tint); border:none; padding:6px 12px; border-radius:999px; }
+  .assignbtn:hover { background:#d3e6e0; }
+  .assign-box { margin-top:8px; display:flex; gap:6px; }
+  .assign-box select { padding:7px 9px; font-size:12.5px; }
+  .assign-confirm { font:inherit; font-size:12px; font-weight:700; cursor:pointer; color:#fff; background:var(--primary); border:none; padding:0 14px; border-radius:var(--radius-sm); flex:none; }
+  .assign-none { font-size:12px; color:#b3261e; margin-top:6px; }
+  .measured { font-size:13px; color:var(--primary-dark); background:var(--primary-tint); border-radius:var(--radius-sm); padding:8px 12px; }
+  .measured b { font-weight:700; }
+  .assigned { margin-top:8px; font-size:12.5px; color:var(--primary-dark); background:var(--primary-tint); border-radius:var(--radius-sm); padding:7px 10px; }
+  .fleet { padding:16px 20px; border-bottom:1px solid var(--line-soft); background:#fbfcfb; }
+  .fleet .grid { gap:10px; }
+  .fleet .fleet-actions { margin-top:12px; display:flex; align-items:center; gap:12px; }
+  @media (prefers-reduced-motion:reduce){ *{ animation:none!important; transition:none!important; } }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2.5c-3.6 0-6.5 2.8-6.5 6.3 0 4.4 5.5 11.4 6 12 .26.32.74.32 1 0 .5-.6 6-7.6 6-12C18.5 5.3 15.6 2.5 12 2.5Z" fill="#fff" fill-opacity=".92"/>
+          <circle cx="12" cy="8.7" r="2.6" fill="#0a4a3e"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">Téranga Mobility</span>
+        <span class="brand-eyebrow">Console opérateur</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="clock" id="clock"><strong>—</strong></div>
+      <span class="status" id="status"><span class="dot"></span><span id="status-text">Connexion…</span></span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel" aria-labelledby="ttl-new">
+      <div class="panel-head"><h2 id="ttl-new">Nouvelle réservation</h2><span class="hint">Saisie pendant l'appel</span></div>
+      <div class="panel-body">
+
+        <div class="section">
+          <p class="section-label"><span class="num">1</span> Passager</p>
+          <div class="grid">
+            <div class="field"><label for="clientName">Nom du passager <span class="req">*</span></label><input id="clientName" type="text" placeholder="Ex. Awa Ndiaye" autocomplete="off" /></div>
+            <div class="field"><label for="clientPhone">Téléphone <span class="req">*</span></label><input id="clientPhone" type="tel" placeholder="+221 7…" autocomplete="off" /></div>
+            <div class="field"><label for="mobilityNeed">Besoin de mobilité</label>
+              <select id="mobilityNeed">
+                <option value="NONE">Aucun besoin particulier</option>
+                <option value="WHEELCHAIR">Fauteuil roulant</option>
+                <option value="WALKING_DIFFICULTY">Difficultés de marche</option>
+                <option value="VISUAL_IMPAIRMENT">Déficience visuelle</option>
+                <option value="STRETCHER">Brancard / allongé</option>
+              </select></div>
+            <div class="field"><label for="bookedBy">Réservé par (proche)</label><input id="bookedBy" type="text" placeholder="Nom — facultatif" autocomplete="off" /></div>
+            <div class="field full"><label for="notes">Notes (contexte médical, repère…)</label><textarea id="notes" placeholder="Facultatif"></textarea></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <p class="section-label"><span class="num">2</span> Trajet</p>
+          <div class="seg" id="modeSeg" style="margin-bottom:14px;">
+            <button type="button" data-mode="free" class="active">Trajet libre (carte)</button>
+            <button type="button" data-mode="fixed">Prix fixe</button>
+          </div>
+          <div class="grid">
+            <div class="field full"><label for="purpose">Motif du déplacement</label>
+              <select id="purpose">
+                <option value="MEDICAL">Médical / hôpital</option>
+                <option value="ERRANDS">Courses / sortie</option>
+                <option value="AIRPORT">Aéroport (AIBD)</option>
+                <option value="OTHER" selected>Autre</option>
+              </select></div>
+            <div class="field full"><label for="pickup">Adresse de départ <span class="req">*</span></label><input id="pickup" type="text" placeholder="Ex. Sicap Liberté 6, Dakar" autocomplete="off" /></div>
+            <div class="field full"><label for="dropoff">Adresse d'arrivée <span class="req">*</span></label><input id="dropoff" type="text" placeholder="Ex. Hôpital Principal, Dakar" autocomplete="off" /></div>
+
+            <div class="field full" id="distWrap">
+              <button type="button" class="btn" id="calcBtn" style="padding:10px 18px; align-self:flex-start;">Calculer le prix (carte)</button>
+              <div id="measured" class="measured hidden"></div>
+              <span class="help">Le prix est calculé à partir des deux adresses (distance + durée réelles).</span>
+            </div>
+            <label class="check full hidden" id="tollWrap" for="viaToll"><input id="viaToll" type="checkbox" /><span class="ct"><b>Trajet via l'autoroute à péage</b><span>Ajoute le péage au tarif (reversé au chauffeur)</span></span></label>
+            <div class="field full hidden" id="fixedWrap">
+              <label for="fixedPrice">Montant convenu (FCFA) <span class="req">*</span></label>
+              <input id="fixedPrice" type="number" min="0" step="500" placeholder="Ex. 15000" />
+              <span class="help">Forfait tout compris pour ce client (tarif négocié, ou quand la carte ne trouve pas l'adresse).</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <p class="section-label"><span class="num">3</span> Quand</p>
+          <div class="seg" id="whenSeg" style="margin-bottom:14px;">
+            <button type="button" data-when="immediate" class="active">Dès que possible</button>
+            <button type="button" data-when="scheduled">Planifier</button>
+          </div>
+          <div class="grid">
+            <div class="field hidden full" id="schedWrap">
+              <label for="scheduledAt">Date et heure <span class="req">*</span></label>
+              <input id="scheduledAt" type="datetime-local" />
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <p class="section-label"><span class="num">4</span> Service &amp; accessibilité</p>
+          <div class="grid">
+            <div class="field"><label for="serviceType">Type de service <span class="req">*</span></label>
+              <select id="serviceType">
+                <option value="SENIOR">Accompagnement senior</option>
+                <option value="MEDICAL_NON_URGENT">Médical non urgent</option>
+                <option value="PMR">PMR</option>
+                <option value="VIP_AIRPORT">VIP aéroport</option>
+              </select></div>
+            <div class="field"><label for="passengers">Nombre de passagers</label><input id="passengers" type="number" min="1" value="1" /></div>
+            <label class="check full" id="wheelchairWrap" for="wheelchair">
+              <input id="wheelchair" type="checkbox" />
+              <span class="ct"><b>Véhicule adapté fauteuil roulant</b><span>Majoration +20 % · obligatoire si fauteuil roulant</span></span>
+            </label>
+            <label class="check full" for="accompaniment">
+              <input id="accompaniment" type="checkbox" />
+              <span class="ct"><b>Accompagnement</b><span>Aide aux démarches / bagages</span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="quote" id="quote">
+          <div class="quote-head"><span>Récapitulatif tarifaire</span><span class="quote-mode hidden" id="quoteMode"></span></div>
+          <div class="quote-body" id="quoteBody"><p class="quote-empty">Renseigne le trajet et le service pour voir le tarif.</p></div>
+        </div>
+
+        <div class="actions">
+          <button class="btn" id="submit">Créer la réservation</button>
+          <span class="formmsg" id="formmsg" role="status"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="ttl-queue">
+      <div class="panel-head"><h2 id="ttl-queue">Courses à venir</h2>
+        <div class="queue-tools"><button class="iconbtn" id="fleetToggle">+ Flotte</button><button class="iconbtn" id="refresh">Actualiser</button></div></div>
+      <div class="fleet hidden" id="fleetPanel">
+        <p class="section-label" style="margin-bottom:12px;"><span class="num">+</span> Ajouter un chauffeur &amp; son véhicule</p>
+        <div class="grid">
+          <div class="field"><label for="fName">Nom du chauffeur</label><input id="fName" type="text" placeholder="Ex. Ibrahima Fall" autocomplete="off" /></div>
+          <div class="field"><label for="fPhone">Téléphone</label><input id="fPhone" type="tel" placeholder="+221 7…" autocomplete="off" /></div>
+          <div class="field"><label for="fReg">Immatriculation</label><input id="fReg" type="text" placeholder="Ex. DK-4567-CD" autocomplete="off" /></div>
+          <div class="field"><label for="fType">Type de véhicule</label>
+            <select id="fType"><option value="SEDAN">Berline</option><option value="SUV">SUV</option><option value="MINIVAN">Minivan</option></select></div>
+          <label class="check full" for="fWheel"><input id="fWheel" type="checkbox" /><span class="ct"><b>Véhicule adapté fauteuil roulant</b></span></label>
+          <label class="check full" for="fAid"><input id="fAid" type="checkbox" /><span class="ct"><b>Chauffeur formé aux premiers secours</b></span></label>
+        </div>
+        <div class="fleet-actions"><button class="btn" id="fleetSave" style="padding:10px 18px;">Enregistrer</button><span class="formmsg" id="fleetMsg"></span></div>
+      </div>
+      <div id="queue" class="queue"><div class="empty">Chargement…</div></div>
+    </section>
+  </main>
+
+<script>
+  const API = 'http://localhost:3000/api';
+  const fmt = new Intl.NumberFormat('fr-FR');
+  const money = (n) => fmt.format(n) + ' FCFA';
+  const $ = (id) => document.getElementById(id);
+
+  let mode = 'free';
+  let when = 'immediate';
+
+  function tick(){ const n=new Date();
+    $('clock').innerHTML = `${n.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'})} · <strong>${n.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</strong>`; }
+  tick(); setInterval(tick,30000);
+
+  function setStatus(s,t){ const e=$('status'); e.classList.remove('ok','down'); if(s)e.classList.add(s); $('status-text').textContent=t; }
+
+  $('whenSeg').addEventListener('click',(e)=>{ const b=e.target.closest('button'); if(!b)return;
+    when=b.dataset.when;
+    $('whenSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));
+    $('schedWrap').classList.toggle('hidden', when!=='scheduled');
+  });
+  $('modeSeg').addEventListener('click',(e)=>{ const b=e.target.closest('button'); if(!b)return;
+    mode=b.dataset.mode;
+    $('modeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));
+    const free=mode==='free';
+    $('distWrap').classList.toggle('hidden', !free);
+    $('fixedWrap').classList.toggle('hidden', free);
+    if(!free){ $('tollWrap').classList.add('hidden'); $('measured').classList.add('hidden'); }
+    scheduleQuote();
+  });
+
+  async function checkApi(){
+    try{ const r=await fetch(API+'/drivers?assignable=true'); if(!r.ok)throw 0; setStatus('ok','API connectée'); return true; }
+    catch(e){ setStatus('down','API injoignable');
+      $('queue').innerHTML='<div class="empty err">Impossible de joindre l\'API.<br>Vérifie que le serveur tourne (npm run start:dev) puis Actualise.</div>'; return false; }
+  }
+
+  let qt=null, estimate=null;
+  function scheduleQuote(){ clearTimeout(qt); qt=setTimeout(refreshQuote,220); }
+  function emptyQuote(t){ $('quoteBody').innerHTML=`<p class="quote-empty">${t}</p>`; $('quoteMode').classList.add('hidden'); }
+  function renderQuote(q){
+    const m=$('quoteMode'); m.classList.remove('hidden'); m.textContent=q.pricingMode==='FLAT'?'Prix fixe':'Au compteur';
+    const body=$('quoteBody');
+    body.innerHTML = q.breakdown.map(l=>`<div class="qline"><span class="lbl">${l.label}</span><span class="amt">${money(l.amountFcfa)}</span></div>`).join('')
+      +`<div class="qtotal"><span class="lbl">Total à payer</span><span class="amt">${fmt.format(q.totalPriceFcfa)}<small>FCFA</small></span></div>`
+      +`<div class="qsplit"><span>Commission ${money(q.commissionFcfa)}</span><span>Chauffeur ${money(q.driverPayoutFcfa)}</span></div>`;
+    body.classList.remove('updating'); void body.offsetWidth; body.classList.add('updating');
+  }
+
+  // Trajet libre : mesurer via la carte (géocode les 2 adresses, 1 seul appel)
+  async function doEstimate(){
+    const pickup=$('pickup').value.trim(), dropoff=$('dropoff').value.trim();
+    if(!pickup||!dropoff){ emptyQuote('Renseigne les deux adresses, puis calcule.'); return; }
+    const btn=$('calcBtn'); btn.disabled=true; btn.textContent='Calcul…';
+    try{
+      const r=await fetch(API+'/pricing/estimate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        pickupAddress:pickup, dropoffAddress:dropoff, serviceType:$('serviceType').value,
+        needsWheelchairVehicle:$('wheelchair').checked, withAccompaniment:$('accompaniment').checked })});
+      const q=await r.json();
+      if(!r.ok) throw new Error(Array.isArray(q.message)?q.message.join(', '):(q.message||q.error||'Erreur'));
+      estimate={ distanceMeters:q.distanceMeters, durationSeconds:q.durationSeconds, pickupLat:q.pickupLat, pickupLng:q.pickupLng, dropoffLat:q.dropoffLat, dropoffLng:q.dropoffLng };
+      const km=(q.distanceMeters/1000).toFixed(1), min=Math.round(q.durationSeconds/60);
+      $('measured').innerHTML=`Distance : <b>${km} km</b> · Durée estimée : <b>${min} min</b>`; $('measured').classList.remove('hidden');
+      $('tollWrap').classList.remove('hidden'); $('viaToll').checked=!!q.tollPresent;
+      renderQuote(q);
+    }catch(e){ estimate=null; $('measured').classList.add('hidden'); emptyQuote('Mesure impossible : '+e.message); }
+    finally{ btn.disabled=false; btn.textContent='Recalculer le prix (carte)'; }
+  }
+  $('calcBtn').addEventListener('click',doEstimate);
+
+  // Recalcul tarifaire SANS re-géocoder (trajet déjà mesuré)
+  async function refreshQuote(){
+    const payload={ serviceType:$('serviceType').value, needsWheelchairVehicle:$('wheelchair').checked, withAccompaniment:$('accompaniment').checked, viaToll:$('viaToll').checked };
+    if(mode==='fixed'){ const amt=parseInt($('fixedPrice').value,10); if(!amt||amt<=0){ emptyQuote('Saisis le montant convenu.'); return; } payload.fixedPriceFcfa=amt; }
+    else { if(!estimate){ emptyQuote('Renseigne les adresses puis clique « Calculer le prix ».'); return; } payload.distanceMeters=estimate.distanceMeters; payload.durationSeconds=estimate.durationSeconds; }
+    try{
+      const r=await fetch(API+'/pricing/quote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      if(!r.ok)throw 0; renderQuote(await r.json());
+    }catch(e){ emptyQuote('Tarif indisponible — vérifie la connexion.'); }
+  }
+
+  $('mobilityNeed').addEventListener('change',(e)=>{ const wc=$('wheelchair'),w=$('wheelchairWrap');
+    if(e.target.value==='WHEELCHAIR'){ wc.checked=true; wc.disabled=true; w.classList.add('locked'); } else { wc.disabled=false; w.classList.remove('locked'); }
+    scheduleQuote(); });
+  ['serviceType','wheelchair','accompaniment','viaToll'].forEach(id=>$(id).addEventListener('change',scheduleQuote));
+  $('fixedPrice').addEventListener('input',scheduleQuote);
+  // Changer une adresse invalide la mesure précédente
+  ['pickup','dropoff'].forEach(id=>$(id).addEventListener('input',()=>{ estimate=null; $('measured').classList.add('hidden'); $('tollWrap').classList.add('hidden'); }));
+
+  function statusLabel(s){ return {PENDING:'En attente',CONFIRMED:'Confirmée',ASSIGNED:'Affectée',EN_ROUTE:'En route',IN_PROGRESS:'En cours',COMPLETED:'Terminée',CANCELLED:'Annulée',NO_SHOW:'Absent'}[s]||s; }
+  function when2(b){ return b.isImmediate ? 'Dès que possible' : (b.scheduledAt ? new Date(b.scheduledAt).toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : ''); }
+
+  let drivers=[];
+  async function loadDrivers(){ try{ const r=await fetch(API+'/drivers?assignable=true'); if(!r.ok)throw 0; drivers=await r.json(); }catch(e){ drivers=[]; } }
+  function assignOptions(needPmr){
+    const o=[];
+    for(const d of drivers){ for(const v of (d.vehicles||[])){ if(needPmr && !v.wheelchairAccessible) continue;
+      o.push(`<option value="${d.id}|${v.id}">${d.user.fullName} · ${v.model||v.type} (${v.registration})</option>`); } }
+    return o;
+  }
+
+  async function loadQueue(){
+    try{ const r=await fetch(API+'/bookings/upcoming'); if(!r.ok)throw 0; const list=await r.json();
+      const q=$('queue'); if(!list.length){ q.innerHTML='<div class="empty">Aucune course à venir.</div>'; return; }
+      q.innerHTML=list.map(b=>{
+        const now=b.isImmediate?'<span class="tag tag-now">Immédiat</span>':'';
+        const need=b.needsWheelchairVehicle?'<span class="tag tag-need">PMR</span>':'';
+        let action='';
+        if(b.driver){ action=`<div class="assigned">Chauffeur : ${b.driver.user?b.driver.user.fullName:'—'}</div>`; }
+        else if(b.status==='PENDING'||b.status==='CONFIRMED'){
+          const opts=assignOptions(b.needsWheelchairVehicle);
+          action = opts.length
+            ? `<div class="assign"><button class="assignbtn" data-action="toggle">Affecter un chauffeur</button>
+                 <div class="assign-box hidden"><select class="assign-select">${opts.join('')}</select><button class="assign-confirm" data-action="confirm">OK</button></div></div>`
+            : `<div class="assign-none">${b.needsWheelchairVehicle?'Aucun véhicule adapté disponible':'Aucun chauffeur disponible'} — ajoute via « + Flotte ».</div>`;
+        }
+        return `<div class="qcard" data-id="${b.id}">
+          <div class="qcard-top"><span class="ref">${b.reference}</span>${now}${need}<span class="badge b-${b.status}">${statusLabel(b.status)}</span></div>
+          <div class="who">${b.client?b.client.fullName:'Passager'}</div>
+          <div class="route">${b.pickupAddress}<span class="arrow">→</span>${b.dropoffAddress}</div>
+          <div class="meta"><span>${when2(b)}</span><span class="price">${money(b.totalPriceFcfa)}</span></div>
+          ${action}
+        </div>`;
+      }).join('');
+    }catch(e){ $('queue').innerHTML='<div class="empty err">Impossible de charger les courses.</div>'; }
+  }
+
+  // Affectation chauffeur (délégation d'événements)
+  $('queue').addEventListener('click', async (e)=>{
+    const card=e.target.closest('.qcard'); if(!card)return; const id=card.dataset.id;
+    if(e.target.matches('[data-action="toggle"]')){ card.querySelector('.assign-box').classList.toggle('hidden'); return; }
+    if(e.target.matches('[data-action="confirm"]')){
+      const sel=card.querySelector('.assign-select'); if(!sel||!sel.value)return;
+      const [driverId,vehicleId]=sel.value.split('|'); e.target.disabled=true;
+      try{ const r=await fetch(`${API}/bookings/${id}/assign`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({driverId,vehicleId})});
+        if(!r.ok){ const d=await r.json(); throw new Error(Array.isArray(d.message)?d.message.join(', '):(d.message||d.error||'Erreur')); }
+        loadQueue();
+      }catch(err){ alert('Échec de l\'affectation : '+err.message); e.target.disabled=false; }
+    }
+  });
+
+  function setMsg(t,k){ const m=$('formmsg'); m.textContent=t; m.className='formmsg '+(k||''); }
+  async function submit(){
+    const name=$('clientName').value.trim(), phone=$('clientPhone').value.trim();
+    const pickup=$('pickup').value.trim(), dropoff=$('dropoff').value.trim();
+    if(!name||!phone) return setMsg('Renseigne le nom et le téléphone du passager.','err');
+    if(!pickup||!dropoff) return setMsg('Renseigne les adresses de départ et d\'arrivée.','err');
+
+    const payload={
+      newClient:{ fullName:name, phone, mobilityNeed:$('mobilityNeed').value },
+      channel:'PHONE',
+      tripPurpose:$('purpose').value,
+      pickupAddress:pickup, dropoffAddress:dropoff,
+      passengersCount:parseInt($('passengers').value,10)||1,
+      serviceType:$('serviceType').value,
+      mobilityNeed:$('mobilityNeed').value,
+      needsWheelchairVehicle:$('wheelchair').checked,
+      withAccompaniment:$('accompaniment').checked,
+      isImmediate: when==='immediate',
+    };
+    if(mode==='fixed'){ const amt=parseInt($('fixedPrice').value,10); if(!amt||amt<=0) return setMsg('Saisis le montant convenu.','err'); payload.fixedPriceFcfa=amt; }
+    else { if(!estimate) return setMsg('Clique « Calculer le prix » avant de créer la réservation.','err');
+      payload.distanceMeters=estimate.distanceMeters; payload.durationSeconds=estimate.durationSeconds;
+      payload.pickupLat=estimate.pickupLat; payload.pickupLng=estimate.pickupLng;
+      payload.dropoffLat=estimate.dropoffLat; payload.dropoffLng=estimate.dropoffLng;
+      payload.viaToll=$('viaToll').checked; }
+    if(when==='scheduled'){ const s=$('scheduledAt').value; if(!s) return setMsg('Indique la date et l\'heure.','err'); payload.scheduledAt=new Date(s).toISOString(); }
+
+    const bb=$('bookedBy').value.trim(); if(bb)payload.bookedByName=bb;
+    const nt=$('notes').value.trim(); if(nt)payload.notes=nt;
+
+    const btn=$('submit'); btn.disabled=true; setMsg('Création…','');
+    try{
+      const r=await fetch(API+'/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const data=await r.json();
+      if(!r.ok){ const d=Array.isArray(data.message)?data.message.join(', '):(data.message||data.error||'Erreur'); throw new Error(d); }
+      setMsg('Réservation créée — '+data.reference,'ok'); resetForm(); loadQueue();
+    }catch(e){ setMsg('Échec : '+e.message,'err'); } finally { btn.disabled=false; }
+  }
+  function resetForm(){
+    ['clientName','clientPhone','bookedBy','notes','pickup','dropoff','scheduledAt','fixedPrice'].forEach(id=>$(id).value='');
+    $('passengers').value='1'; $('mobilityNeed').value='NONE'; $('purpose').value='OTHER';
+    $('wheelchair').checked=false; $('wheelchair').disabled=false; $('wheelchairWrap').classList.remove('locked');
+    $('accompaniment').checked=false;
+    estimate=null; $('viaToll').checked=false; $('measured').classList.add('hidden'); $('tollWrap').classList.add('hidden');
+    $('calcBtn').textContent='Calculer le prix (carte)';
+    mode='free'; $('modeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x.dataset.mode==='free'));
+    $('distWrap').classList.remove('hidden'); $('fixedWrap').classList.add('hidden');
+    emptyQuote('Renseigne le trajet et le service pour voir le tarif.');
+  }
+
+  // Flotte : ajouter un chauffeur + son véhicule
+  $('fleetToggle').addEventListener('click',()=>$('fleetPanel').classList.toggle('hidden'));
+  function setFleetMsg(t,k){ const m=$('fleetMsg'); m.textContent=t; m.className='formmsg '+(k||''); }
+  async function addFleet(){
+    const name=$('fName').value.trim(), phone=$('fPhone').value.trim(), reg=$('fReg').value.trim();
+    if(!name||!phone||!reg) return setFleetMsg('Nom, téléphone et immatriculation requis.','err');
+    const btn=$('fleetSave'); btn.disabled=true; setFleetMsg('Enregistrement…','');
+    try{
+      let r=await fetch(API+'/drivers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fullName:name,phone,firstAidCertified:$('fAid').checked})});
+      const d=await r.json(); if(!r.ok)throw new Error(Array.isArray(d.message)?d.message.join(', '):(d.message||d.error||'Erreur chauffeur'));
+      r=await fetch(API+'/vehicles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({registration:reg,type:$('fType').value,wheelchairAccessible:$('fWheel').checked,driverId:d.id})});
+      const v=await r.json(); if(!r.ok)throw new Error(Array.isArray(v.message)?v.message.join(', '):(v.message||v.error||'Erreur véhicule'));
+      setFleetMsg('Chauffeur ajouté ✓','ok');
+      ['fName','fPhone','fReg'].forEach(x=>$(x).value=''); $('fWheel').checked=false; $('fAid').checked=false;
+      await loadDrivers(); loadQueue();
+    }catch(err){ setFleetMsg('Échec : '+err.message,'err'); } finally { btn.disabled=false; }
+  }
+  $('fleetSave').addEventListener('click',addFleet);
+
+  $('submit').addEventListener('click',submit);
+  $('refresh').addEventListener('click',()=>{ checkApi(); loadDrivers(); loadQueue(); });
+
+  (async function init(){ const ok=await checkApi(); await loadDrivers(); if(ok) loadQueue(); })();
+</script>
+</body>
+</html>
