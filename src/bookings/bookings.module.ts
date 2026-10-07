@@ -12,6 +12,8 @@ import {
 import { Booking, BookingStatus } from '@prisma/client';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { AssignBookingDto } from './dto/assign-booking.dto';
+import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { PricingModule } from '../pricing/pricing.module';
 
 @Controller('bookings')
@@ -38,17 +40,17 @@ export class BookingsController {
   @Patch(':id/assign')
   assign(
     @Param('id') id: string,
-    @Body() body: { driverId: string; vehicleId: string },
+    @Body() dto: AssignBookingDto,
   ): Promise<Booking> {
-    return this.bookings.assign(id, body.driverId, body.vehicleId);
+    return this.bookings.assign(id, dto.driverId, dto.vehicleId);
   }
 
   @Patch(':id/status')
   updateStatus(
     @Param('id') id: string,
-    @Body() body: { status: BookingStatus },
+    @Body() dto: UpdateBookingStatusDto,
   ): Promise<Booking> {
-    return this.bookings.updateStatus(id, body.status);
+    return this.bookings.updateStatus(id, dto.status);
   }
 }
 

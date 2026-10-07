@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Module, Param, Patch, Post, Query } from '@nestjs/common';
-import { Driver, DriverStatus } from '@prisma/client';
+import { Driver } from '@prisma/client';
 import { DriversService } from './drivers.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
+import { UpdateDriverStatusDto } from './dto/update-driver-status.dto';
 
 @Controller('drivers')
 export class DriversController {
@@ -22,9 +23,9 @@ export class DriversController {
   @Patch(':id/status')
   updateStatus(
     @Param('id') id: string,
-    @Body() body: { status: DriverStatus },
+    @Body() dto: UpdateDriverStatusDto,
   ): Promise<Driver> {
-    return this.drivers.updateStatus(id, body.status);
+    return this.drivers.updateStatus(id, dto.status);
   }
 }
 

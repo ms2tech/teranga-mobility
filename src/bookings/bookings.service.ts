@@ -147,7 +147,13 @@ export class BookingsService {
     return this.prisma.booking.findMany({
       where: status ? { status } : { status: { in: ACTIVE_STATUSES } },
       orderBy: [{ isImmediate: 'desc' }, { scheduledAt: 'asc' }],
-      include: { client: true, route: true, driver: { include: { user: true } } },
+      include: {
+        client: true,
+        route: true,
+        driver: { include: { user: true } },
+        // Dernière tentative de paiement : la console en tire le lien et le statut
+        payments: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
     });
   }
 
@@ -156,8 +162,15 @@ export class BookingsService {
     const booking = await this.prisma.booking.findUnique({ where: { id } });
     if (!booking) throw new NotFoundException(`Réservation introuvable: ${id}`);
 
+    const driver = await this.prisma.driver.findUnique({ where: { id: driverId } });
+    if (!driver) throw new NotFoundException(`Chauffeur introuvable: ${driverId}`);
+
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
     if (!vehicle) throw new NotFoundException(`Véhicule introuvable: ${vehicleId}`);
+
+    if (vehicle.driverId !== driverId) {
+      throw new BadRequestException("Ce véhicule n'appartient pas à ce chauffeur.");
+    }
 
     if (booking.needsWheelchairVehicle && !vehicle.wheelchairAccessible) {
       throw new BadRequestException(
@@ -176,7 +189,10 @@ export class BookingsService {
   }
 
   /** Transition d'état avec horodatage automatique. */
-  updateStatus(id: string, status: BookingStatus): Promise<Booking> {
+  async updateStatus(id: string, status: BookingStatus): Promise<Booking> {
+    const booking = await this.prisma.booking.findUnique({ where: { id } });
+    if (!booking) throw new NotFoundException(`Réservation introuvable: ${id}`);
+
     const stamps: Partial<Record<BookingStatus, Prisma.BookingUpdateInput>> = {
       COMPLETED: { completedAt: new Date() },
       CANCELLED: { cancelledAt: new Date() },

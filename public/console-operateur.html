@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- public/console-operateur.html — servie sur « / » par l'API (voir src/main.ts) -->
 <html lang="fr">
 <head>
 <meta charset="UTF-8" />
@@ -125,6 +126,19 @@
   .measured { font-size:13px; color:var(--primary-dark); background:var(--primary-tint); border-radius:var(--radius-sm); padding:8px 12px; }
   .measured b { font-weight:700; }
   .assigned { margin-top:8px; font-size:12.5px; color:var(--primary-dark); background:var(--primary-tint); border-radius:var(--radius-sm); padding:7px 10px; }
+  .assignbtn:disabled { opacity:.6; cursor:not-allowed; }
+  a.assignbtn { display:inline-block; text-decoration:none; }
+  .tag-paid { background:#d6efdd; color:#166534; }
+  .pay { margin-top:10px; display:flex; flex-direction:column; gap:8px; }
+  .paidbox { font-size:12.5px; font-weight:600; color:#166534; background:#d6efdd; border-radius:var(--radius-sm); padding:7px 10px; }
+  .paidbox a { color:#166534; }
+  .paylink { display:flex; gap:6px; }
+  .payurl { font-size:12px; padding:7px 9px; min-width:0; }
+  .payactions { display:flex; flex-wrap:wrap; gap:6px; }
+  .wabtn { background:#d8f3e3; color:#0b6b3a; }
+  .wabtn:hover { background:#c3ecd5; }
+  .paymsg { font-size:12px; color:var(--muted); }
+  .paymsg.err { color:#c0392b; }
   .fleet { padding:16px 20px; border-bottom:1px solid var(--line-soft); background:#fbfcfb; }
   .fleet .grid { gap:10px; }
   .fleet .fleet-actions { margin-top:12px; display:flex; align-items:center; gap:12px; }
@@ -161,7 +175,9 @@
           <div class="grid">
             <div class="field"><label for="clientName">Nom du passager <span class="req">*</span></label><input id="clientName" type="text" placeholder="Ex. Awa Ndiaye" autocomplete="off" /></div>
             <div class="field"><label for="clientPhone">Téléphone <span class="req">*</span></label><input id="clientPhone" type="tel" placeholder="+221 7…" autocomplete="off" /></div>
-            <div class="field"><label for="mobilityNeed">Besoin de mobilité</label>
+            <div class="field"><label for="bookedBy">Réservé par (proche)</label><input id="bookedBy" type="text" placeholder="Nom — facultatif" autocomplete="off" /></div>
+            <div class="field"><label for="bookedByPhone">Téléphone du proche</label><input id="bookedByPhone" type="tel" placeholder="+221 7… — facultatif" autocomplete="off" /><span class="help">Le lien de paiement WhatsApp lui est envoyé en priorité.</span></div>
+            <div class="field full"><label for="mobilityNeed">Besoin de mobilité</label>
               <select id="mobilityNeed">
                 <option value="NONE">Aucun besoin particulier</option>
                 <option value="WHEELCHAIR">Fauteuil roulant</option>
@@ -169,7 +185,6 @@
                 <option value="VISUAL_IMPAIRMENT">Déficience visuelle</option>
                 <option value="STRETCHER">Brancard / allongé</option>
               </select></div>
-            <div class="field"><label for="bookedBy">Réservé par (proche)</label><input id="bookedBy" type="text" placeholder="Nom — facultatif" autocomplete="off" /></div>
             <div class="field full"><label for="notes">Notes (contexte médical, repère…)</label><textarea id="notes" placeholder="Facultatif"></textarea></div>
           </div>
         </div>
@@ -274,10 +289,37 @@
   </main>
 
 <script>
-  const API = 'http://localhost:3000/api';
+  const API = '/api';
   const fmt = new Intl.NumberFormat('fr-FR');
   const money = (n) => fmt.format(n) + ' FCFA';
   const $ = (id) => document.getElementById(id);
+
+  // Toute donnée venue de l'API est échappée avant d'être insérée dans le HTML.
+  const ESC = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
+  // Un lien n'est affiché que s'il est en https (pas de javascript:, data:…).
+  const safeUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) ? u : '');
+  const apiError = (d) => Array.isArray(d.message) ? d.message.join(', ') : (d.message || d.error || 'Erreur');
+
+  // Numéro au format international sans « + » (exigé par wa.me), ou null si on n'en est pas sûr.
+  function waNumber(raw){
+    const s = String(raw ?? '').trim();
+    let d = s.replace(/\D/g, '');
+    if (!d) return null;
+    if (s.startsWith('+')) { /* déjà international */ }
+    else if (d.startsWith('00')) d = d.slice(2);
+    else if (d.length === 9 && d[0] === '7') d = '221' + d;   // mobile sénégalais sans indicatif
+    else if (!d.startsWith('221')) return null;               // indicatif inconnu : on ne devine pas
+    return d.length >= 8 && d.length <= 15 ? d : null;
+  }
+  // Destinataire : le proche (bookedByPhone) s'il est renseigné, sinon le passager.
+  // Numéro absent ou douteux : wa.me sans destinataire, WhatsApp laisse choisir le contact.
+  function whatsappLink(b, url){
+    const proche = String(b.bookedByPhone ?? '').trim();
+    const num = waNumber(proche ? b.bookedByPhone : (b.client && b.client.phone));
+    const msg = `Bonjour, voici le lien pour régler votre course Téranga Mobility.\nRéférence : ${b.reference}\nMontant : ${money(b.totalPriceFcfa)}\nLien de paiement : ${url}`;
+    return `https://wa.me/${num || ''}?text=${encodeURIComponent(msg)}`;
+  }
 
   let mode = 'free';
   let when = 'immediate';
@@ -311,13 +353,13 @@
 
   let qt=null, estimate=null;
   function scheduleQuote(){ clearTimeout(qt); qt=setTimeout(refreshQuote,220); }
-  function emptyQuote(t){ $('quoteBody').innerHTML=`<p class="quote-empty">${t}</p>`; $('quoteMode').classList.add('hidden'); }
+  function emptyQuote(t){ $('quoteBody').innerHTML=`<p class="quote-empty">${esc(t)}</p>`; $('quoteMode').classList.add('hidden'); }
   function renderQuote(q){
     const m=$('quoteMode'); m.classList.remove('hidden'); m.textContent=q.pricingMode==='FLAT'?'Prix fixe':'Au compteur';
     const body=$('quoteBody');
-    body.innerHTML = q.breakdown.map(l=>`<div class="qline"><span class="lbl">${l.label}</span><span class="amt">${money(l.amountFcfa)}</span></div>`).join('')
-      +`<div class="qtotal"><span class="lbl">Total à payer</span><span class="amt">${fmt.format(q.totalPriceFcfa)}<small>FCFA</small></span></div>`
-      +`<div class="qsplit"><span>Commission ${money(q.commissionFcfa)}</span><span>Chauffeur ${money(q.driverPayoutFcfa)}</span></div>`;
+    body.innerHTML = q.breakdown.map(l=>`<div class="qline"><span class="lbl">${esc(l.label)}</span><span class="amt">${esc(money(l.amountFcfa))}</span></div>`).join('')
+      +`<div class="qtotal"><span class="lbl">Total à payer</span><span class="amt">${esc(fmt.format(q.totalPriceFcfa))}<small>FCFA</small></span></div>`
+      +`<div class="qsplit"><span>Commission ${esc(money(q.commissionFcfa))}</span><span>Chauffeur ${esc(money(q.driverPayoutFcfa))}</span></div>`;
     body.classList.remove('updating'); void body.offsetWidth; body.classList.add('updating');
   }
 
@@ -334,7 +376,7 @@
       if(!r.ok) throw new Error(Array.isArray(q.message)?q.message.join(', '):(q.message||q.error||'Erreur'));
       estimate={ distanceMeters:q.distanceMeters, durationSeconds:q.durationSeconds, pickupLat:q.pickupLat, pickupLng:q.pickupLng, dropoffLat:q.dropoffLat, dropoffLng:q.dropoffLng };
       const km=(q.distanceMeters/1000).toFixed(1), min=Math.round(q.durationSeconds/60);
-      $('measured').innerHTML=`Distance : <b>${km} km</b> · Durée estimée : <b>${min} min</b>`; $('measured').classList.remove('hidden');
+      $('measured').innerHTML=`Distance : <b>${esc(km)} km</b> · Durée estimée : <b>${esc(min)} min</b>`; $('measured').classList.remove('hidden');
       $('tollWrap').classList.remove('hidden'); $('viaToll').checked=!!q.tollPresent;
       renderQuote(q);
     }catch(e){ estimate=null; $('measured').classList.add('hidden'); emptyQuote('Mesure impossible : '+e.message); }
@@ -369,9 +411,31 @@
   function assignOptions(needPmr){
     const o=[];
     for(const d of drivers){ for(const v of (d.vehicles||[])){ if(needPmr && !v.wheelchairAccessible) continue;
-      o.push(`<option value="${d.id}|${v.id}">${d.user.fullName} · ${v.model||v.type} (${v.registration})</option>`); } }
+      o.push(`<option value="${esc(d.id)}|${esc(v.id)}">${esc(d.user.fullName)} · ${esc(v.model||v.type)} (${esc(v.registration)})</option>`); } }
     return o;
   }
+
+  // Bloc paiement d'une course : payée, lien à envoyer, ou aucun lien encore.
+  // `payments[0]` est la dernière tentative (voir BookingsService.findUpcoming).
+  function payBlock(b){
+    const p=(b.payments&&b.payments[0])||null;
+    if(b.paymentStatus==='PAID'){
+      const rec=p?safeUrl(p.receiptUrl):'';
+      return `<div class="pay"><div class="paidbox">Paiement reçu ✓${rec?` · <a href="${esc(rec)}" target="_blank" rel="noopener noreferrer">Reçu</a>`:''}</div></div>`;
+    }
+    const url=(p&&p.status==='PENDING')?safeUrl(p.paymentUrl):'';
+    if(!url){
+      return `<div class="pay"><div><button class="assignbtn" data-action="paylink">Lien de paiement</button></div><span class="paymsg" role="status"></span></div>`;
+    }
+    return `<div class="pay">
+      <div class="paylink"><input class="payurl" type="text" readonly value="${esc(url)}" aria-label="Lien de paiement" /><button class="assignbtn" data-action="copy">Copier</button></div>
+      <div class="payactions">
+        <a class="assignbtn wabtn" href="${esc(whatsappLink(b,url))}" target="_blank" rel="noopener noreferrer">Envoyer par WhatsApp</a>
+        <button class="assignbtn" data-action="check" data-payment="${esc(p.id)}">Vérifier le paiement</button>
+      </div>
+      <span class="paymsg" role="status"></span></div>`;
+  }
+  function setPayMsg(card,t,isErr){ const m=card&&card.querySelector('.paymsg'); if(m){ m.textContent=t; m.className='paymsg'+(isErr?' err':''); } }
 
   async function loadQueue(){
     try{ const r=await fetch(API+'/bookings/upcoming'); if(!r.ok)throw 0; const list=await r.json();
@@ -379,8 +443,9 @@
       q.innerHTML=list.map(b=>{
         const now=b.isImmediate?'<span class="tag tag-now">Immédiat</span>':'';
         const need=b.needsWheelchairVehicle?'<span class="tag tag-need">PMR</span>':'';
+        const paid=b.paymentStatus==='PAID'?'<span class="tag tag-paid">Payé</span>':'';
         let action='';
-        if(b.driver){ action=`<div class="assigned">Chauffeur : ${b.driver.user?b.driver.user.fullName:'—'}</div>`; }
+        if(b.driver){ action=`<div class="assigned">Chauffeur : ${esc(b.driver.user?b.driver.user.fullName:'—')}</div>`; }
         else if(b.status==='PENDING'||b.status==='CONFIRMED'){
           const opts=assignOptions(b.needsWheelchairVehicle);
           action = opts.length
@@ -388,28 +453,64 @@
                  <div class="assign-box hidden"><select class="assign-select">${opts.join('')}</select><button class="assign-confirm" data-action="confirm">OK</button></div></div>`
             : `<div class="assign-none">${b.needsWheelchairVehicle?'Aucun véhicule adapté disponible':'Aucun chauffeur disponible'} — ajoute via « + Flotte ».</div>`;
         }
-        return `<div class="qcard" data-id="${b.id}">
-          <div class="qcard-top"><span class="ref">${b.reference}</span>${now}${need}<span class="badge b-${b.status}">${statusLabel(b.status)}</span></div>
-          <div class="who">${b.client?b.client.fullName:'Passager'}</div>
-          <div class="route">${b.pickupAddress}<span class="arrow">→</span>${b.dropoffAddress}</div>
-          <div class="meta"><span>${when2(b)}</span><span class="price">${money(b.totalPriceFcfa)}</span></div>
+        return `<div class="qcard" data-id="${esc(b.id)}">
+          <div class="qcard-top"><span class="ref">${esc(b.reference)}</span>${now}${need}${paid}<span class="badge b-${esc(b.status)}">${esc(statusLabel(b.status))}</span></div>
+          <div class="who">${esc(b.client?b.client.fullName:'Passager')}</div>
+          <div class="route">${esc(b.pickupAddress)}<span class="arrow">→</span>${esc(b.dropoffAddress)}</div>
+          <div class="meta"><span>${esc(when2(b))}</span><span class="price">${esc(money(b.totalPriceFcfa))}</span></div>
           ${action}
+          ${payBlock(b)}
         </div>`;
       }).join('');
     }catch(e){ $('queue').innerHTML='<div class="empty err">Impossible de charger les courses.</div>'; }
   }
 
-  // Affectation chauffeur (délégation d'événements)
+  // Actions sur une course : affectation, lien de paiement, copie, vérification (délégation d'événements)
   $('queue').addEventListener('click', async (e)=>{
-    const card=e.target.closest('.qcard'); if(!card)return; const id=card.dataset.id;
-    if(e.target.matches('[data-action="toggle"]')){ card.querySelector('.assign-box').classList.toggle('hidden'); return; }
-    if(e.target.matches('[data-action="confirm"]')){
+    const btn=e.target.closest('[data-action]'); if(!btn)return;
+    const card=btn.closest('.qcard'); if(!card)return;
+    const id=card.dataset.id, act=btn.dataset.action;
+
+    if(act==='toggle'){ card.querySelector('.assign-box').classList.toggle('hidden'); return; }
+
+    if(act==='confirm'){
       const sel=card.querySelector('.assign-select'); if(!sel||!sel.value)return;
-      const [driverId,vehicleId]=sel.value.split('|'); e.target.disabled=true;
-      try{ const r=await fetch(`${API}/bookings/${id}/assign`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({driverId,vehicleId})});
-        if(!r.ok){ const d=await r.json(); throw new Error(Array.isArray(d.message)?d.message.join(', '):(d.message||d.error||'Erreur')); }
+      const [driverId,vehicleId]=sel.value.split('|'); btn.disabled=true;
+      try{ const r=await fetch(`${API}/bookings/${encodeURIComponent(id)}/assign`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({driverId,vehicleId})});
+        if(!r.ok){ const d=await r.json(); throw new Error(apiError(d)); }
         loadQueue();
-      }catch(err){ alert('Échec de l\'affectation : '+err.message); e.target.disabled=false; }
+      }catch(err){ alert('Échec de l\'affectation : '+err.message); btn.disabled=false; }
+      return;
+    }
+
+    if(act==='paylink'){
+      btn.disabled=true; setPayMsg(card,'Génération du lien…');
+      try{ const r=await fetch(`${API}/payments/bookings/${encodeURIComponent(id)}/link`,{method:'POST'});
+        const d=await r.json(); if(!r.ok) throw new Error(apiError(d));
+        await loadQueue();
+      }catch(err){ setPayMsg(card,'Échec : '+err.message,true); btn.disabled=false; }
+      return;
+    }
+
+    if(act==='copy'){
+      const input=card.querySelector('.payurl'); let ok=false;
+      try{ await navigator.clipboard.writeText(input.value); ok=true; }
+      catch(_){ input.select(); try{ ok=document.execCommand('copy'); }catch(__){} }
+      const old=btn.textContent; btn.textContent=ok?'Copié ✓':'Copie impossible';
+      setTimeout(()=>{ btn.textContent=old; },1600);
+      return;
+    }
+
+    if(act==='check'){
+      btn.disabled=true; setPayMsg(card,'Vérification auprès de PayDunya…');
+      try{ const r=await fetch(`${API}/payments/${encodeURIComponent(btn.dataset.payment)}/check`,{method:'POST'});
+        const d=await r.json(); if(!r.ok) throw new Error(apiError(d));
+        if(d.status==='PAID'){ await loadQueue(); }
+        else if(d.status==='FAILED'){
+          await loadQueue();
+          setPayMsg(document.querySelector(`.qcard[data-id="${CSS.escape(id)}"]`),'Le dernier paiement a échoué ou a été annulé : génère un nouveau lien.',true);
+        } else { setPayMsg(card,'Pas encore payé.'); btn.disabled=false; }
+      }catch(err){ setPayMsg(card,'Échec : '+err.message,true); btn.disabled=false; }
     }
   });
 
@@ -441,6 +542,7 @@
     if(when==='scheduled'){ const s=$('scheduledAt').value; if(!s) return setMsg('Indique la date et l\'heure.','err'); payload.scheduledAt=new Date(s).toISOString(); }
 
     const bb=$('bookedBy').value.trim(); if(bb)payload.bookedByName=bb;
+    const bp=$('bookedByPhone').value.trim(); if(bp)payload.bookedByPhone=bp;
     const nt=$('notes').value.trim(); if(nt)payload.notes=nt;
 
     const btn=$('submit'); btn.disabled=true; setMsg('Création…','');
@@ -452,7 +554,7 @@
     }catch(e){ setMsg('Échec : '+e.message,'err'); } finally { btn.disabled=false; }
   }
   function resetForm(){
-    ['clientName','clientPhone','bookedBy','notes','pickup','dropoff','scheduledAt','fixedPrice'].forEach(id=>$(id).value='');
+    ['clientName','clientPhone','bookedBy','bookedByPhone','notes','pickup','dropoff','scheduledAt','fixedPrice'].forEach(id=>$(id).value='');
     $('passengers').value='1'; $('mobilityNeed').value='NONE'; $('purpose').value='OTHER';
     $('wheelchair').checked=false; $('wheelchair').disabled=false; $('wheelchairWrap').classList.remove('locked');
     $('accompaniment').checked=false;
