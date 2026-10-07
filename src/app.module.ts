@@ -6,6 +6,7 @@ import { RoutesModule } from './routes/routes.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { DriversModule } from './drivers/drivers.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
+import { PaymentsModule } from './payments/payments.module';
 import { businessConfig } from './config/business.config';
 
 @Module({
@@ -17,6 +18,7 @@ import { businessConfig } from './config/business.config';
     BookingsModule,
     DriversModule,
     VehiclesModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}

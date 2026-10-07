@@ -286,8 +286,8 @@ model Booking {
   completedAt DateTime?
   cancelledAt DateTime?
 
-  payment Payment?
-  payout  DriverPayout?
+  payments Payment[]
+  payout   DriverPayout?
 
   @@index([status])
   @@index([scheduledAt])
@@ -295,19 +295,24 @@ model Booking {
   @@index([driverId])
 }
 
-// Encaissement client (via agrégateur : Wave / Orange Money)
+// Tentative d'encaissement client (via agrégateur : Wave / Orange Money / carte).
+// Une réservation peut en avoir plusieurs (lien expiré, paiement échoué, etc.).
 model Payment {
-  id          String        @id @default(cuid())
-  bookingId   String        @unique
-  booking     Booking       @relation(fields: [bookingId], references: [id])
+  id          String         @id @default(cuid())
+  bookingId   String
+  booking     Booking        @relation(fields: [bookingId], references: [id])
   amountFcfa  Int
-  method      PaymentMethod
+  method      PaymentMethod? // connu seulement après le paiement
   provider    String? // ex. "PAYDUNYA", "SENEPAY"
-  providerRef String? // identifiant transaction côté agrégateur
-  status      PaymentStatus @default(PENDING)
+  providerRef String?        @unique // token de facture côté agrégateur
+  paymentUrl  String? // lien de paiement envoyé au client
+  receiptUrl  String? // reçu fourni par l'agrégateur
+  status      PaymentStatus  @default(PENDING)
   paidAt      DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([bookingId])
 }
 
 // Reversement de la part chauffeur (Wave Bulk Pay, lots)
