@@ -1,7 +1,7 @@
 // prisma/create-user.ts
 /**
  * Gestion des comptes du personnel de la console : `npm run user:create`.
- *   - créer un compte (ADMIN ou OPERATOR), ou reprendre un compte existant du
+ *   - créer un compte (ADMIN, MANAGER ou OPERATOR), ou reprendre un compte existant du
  *     seed à partir de son téléphone ;
  *   - réinitialiser le mot de passe d'un compte existant ;
  *   - désactiver / réactiver un compte : c'est le SEUL verrouillage, manuel,
@@ -13,8 +13,8 @@
 import { Prisma, PrismaClient, User } from '@prisma/client';
 import { hashPassword, passwordProblem } from '../src/auth/password';
 
-type StaffRole = 'ADMIN' | 'OPERATOR';
-const STAFF_ROLES: StaffRole[] = ['ADMIN', 'OPERATOR'];
+type StaffRole = 'ADMIN' | 'MANAGER' | 'OPERATOR';
+const STAFF_ROLES: StaffRole[] = ['ADMIN', 'MANAGER', 'OPERATOR'];
 
 // ── Accès aux données (exportées pour être testées) ─────────────────────
 
@@ -45,7 +45,7 @@ export interface SaveStaffInput {
 export async function saveStaffUser(prisma: PrismaClient, input: SaveStaffInput): Promise<User> {
   const problem = passwordProblem(input.password);
   if (problem) throw new Error(problem);
-  if (!STAFF_ROLES.includes(input.role)) throw new Error('Rôle invalide : ADMIN ou OPERATOR.');
+  if (!STAFF_ROLES.includes(input.role)) throw new Error('Rôle invalide : ADMIN, MANAGER ou OPERATOR.');
 
   const email = input.email.trim().toLowerCase();
   const passwordHash = await hashPassword(input.password);
@@ -232,8 +232,8 @@ async function createNew(prisma: PrismaClient, email: string): Promise<void> {
   } else {
     fullName = (await ask('Nom complet : ')).trim();
     if (!fullName) throw new Error('Le nom est obligatoire.');
-    const r = (await ask('Rôle [ADMIN/OPERATOR] : ')).trim().toUpperCase();
-    if (!STAFF_ROLES.includes(r as StaffRole)) throw new Error('Rôle invalide : ADMIN ou OPERATOR.');
+    const r = (await ask('Rôle [ADMIN/MANAGER/OPERATOR] : ')).trim().toUpperCase();
+    if (!STAFF_ROLES.includes(r as StaffRole)) throw new Error('Rôle invalide : ADMIN, MANAGER ou OPERATOR.');
     role = r as StaffRole;
   }
 

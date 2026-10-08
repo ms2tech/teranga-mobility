@@ -2,6 +2,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   Inject,
   Logger,
@@ -11,8 +12,13 @@ import {
 } from '@nestjs/common';
 import { Payment } from '@prisma/client';
 import { PaymentsService } from './payments.service';
+import { ManualPaymentsService } from './manual-payments.service';
 import { PAYMENT_PROVIDER, PaymentProvider } from './payment-provider.interface';
-import { Public } from '../auth/auth.decorators';
+import { CurrentUser, Public, Roles } from '../auth/auth.decorators';
+import { ADMIN_ROLES, AuthUser, MANAGER_ROLES } from '../auth/auth.types';
+import { ManualPaymentDto } from './dto/manual-payment.dto';
+import { RefundPaymentDto } from './dto/refund-payment.dto';
+import { VoidPaymentDto } from './dto/void-payment.dto';
 
 @Controller('payments')
 export class PaymentsController {
@@ -20,8 +26,57 @@ export class PaymentsController {
 
   constructor(
     private readonly payments: PaymentsService,
+    private readonly manual: ManualPaymentsService,
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
   ) {}
+
+  /** Historique complet des paiements d'une course (annulés et remboursés compris). */
+  @Get('bookings/:bookingId')
+  history(@Param('bookingId') bookingId: string) {
+    return this.manual.history(bookingId);
+  }
+
+  /** Confirmation manuelle « Autre » : l'argent est reçu (MANAGER, ADMIN). Débloque le départ. */
+  @Post('bookings/:bookingId/manual')
+  @Roles(...MANAGER_ROLES)
+  confirmManually(
+    @Param('bookingId') bookingId: string,
+    @Body() dto: ManualPaymentDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<Payment> {
+    return this.manual.confirm(bookingId, dto, user);
+  }
+
+  /** Panneau « À régler » : doubles paiements à rembourser (MANAGER, ADMIN). */
+  @Get('to-refund')
+  @Roles(...MANAGER_ROLES)
+  toRefund() {
+    return this.manual.listToRefund();
+  }
+
+  /** Annule une confirmation manuelle, avec motif, sans effacer l'historique (ADMIN). */
+  @Post(':id/void')
+  @HttpCode(200)
+  @Roles(...ADMIN_ROLES)
+  voidConfirmation(
+    @Param('id') id: string,
+    @Body() dto: VoidPaymentDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<Payment> {
+    return this.manual.voidConfirmation(id, dto.reason, user);
+  }
+
+  /** Marque un paiement comme remboursé (fait à la main), avec motif et référence (ADMIN). */
+  @Post(':id/refund')
+  @HttpCode(200)
+  @Roles(...ADMIN_ROLES)
+  refund(
+    @Param('id') id: string,
+    @Body() dto: RefundPaymentDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<Payment> {
+    return this.manual.refund(id, dto, user);
+  }
 
   /** L'opérateur génère un lien de paiement pour une réservation. */
   @Post('bookings/:bookingId/link')

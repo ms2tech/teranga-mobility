@@ -4,6 +4,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Payment, Prisma } from '@prisma/client';
@@ -12,6 +13,8 @@ import { PAYMENT_PROVIDER, PaymentProvider } from './payment-provider.interface'
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
@@ -94,12 +97,14 @@ export class PaymentsService {
       where: { providerRef: token },
     });
     if (!payment) return null;
-    if (payment.status === 'PAID') return payment;
+    if (payment.status === 'PAID' || payment.status === 'REFUNDED') return payment;
 
     const result = await this.provider.confirm(token);
     if (result.status === 'PENDING' || result.status === payment.status) {
       return payment;
     }
+    // Un lien abandonné (CANCELLED) ne reprend vie que s'il est réellement payé.
+    if (payment.status === 'CANCELLED' && result.status !== 'PAID') return payment;
 
     const data: Prisma.PaymentUpdateManyMutationInput = {
       status: result.status,
@@ -112,18 +117,24 @@ export class PaymentsService {
       // Le filtre sur le statut protège des synchronisations simultanées
       // (IPN rejoué + vérification manuelle) : une seule applique le changement.
       const { count } = await tx.payment.updateMany({
-        where: { id: payment.id, status: { in: ['PENDING', 'FAILED'] } },
+        where: { id: payment.id, status: { in: ['PENDING', 'FAILED', 'CANCELLED'] } },
         data,
       });
 
       if (count > 0 && result.status === 'PAID') {
-        await tx.booking.update({
-          where: { id: payment.bookingId },
-          data: {
-            paymentStatus: 'PAID',
-            paymentMethod: result.method,
-          },
+        // Le premier paiement valide gagne. Si la course est déjà payée (par une
+        // confirmation manuelle, par exemple), cet argent est bien arrivé mais
+        // n'est pas appliqué : double paiement, à rembourser par un admin.
+        const applied = await tx.booking.updateMany({
+          where: { id: payment.bookingId, paymentStatus: { not: 'PAID' } },
+          data: { paymentStatus: 'PAID', paymentMethod: result.method },
         });
+        if (applied.count === 0) {
+          await tx.payment.update({ where: { id: payment.id }, data: { isDuplicate: true } });
+          this.logger.warn(
+            `Double paiement PayDunya : le paiement ${payment.id} (${payment.amountFcfa} FCFA) est arrivé alors que la course ${payment.bookingId} était déjà payée. À rembourser.`,
+          );
+        }
       }
       return tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
     });

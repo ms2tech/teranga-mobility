@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,10 +9,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { generateBookingReference } from '../common/reference';
+import { PAYMENT_PEOPLE } from '../payments/payment.include';
 
 const ACTIVE_STATUSES: BookingStatus[] = [
   'PENDING', 'CONFIRMED', 'ASSIGNED', 'EN_ROUTE', 'IN_PROGRESS',
 ];
+
+// Une course non payée ne part pas (carburant et temps) : le chauffeur peut être
+// affecté à l'avance, mais le départ est refusé tant que la course n'est pas payée.
+// Seuls EN_ROUTE et IN_PROGRESS, depuis un état d'avant le départ, sont bloqués :
+// COMPLETED, NO_SHOW et CANCELLED enregistrent ce qui s'est passé et ne le sont jamais,
+// et une course déjà partie n'est pas bloquée si son paiement est annulé ensuite.
+const DEPARTURE_STATUSES: BookingStatus[] = ['EN_ROUTE', 'IN_PROGRESS'];
+const BEFORE_DEPARTURE_STATUSES: BookingStatus[] = ['PENDING', 'CONFIRMED', 'ASSIGNED'];
 
 @Injectable()
 export class BookingsService {
@@ -151,8 +161,9 @@ export class BookingsService {
         client: true,
         route: true,
         driver: { include: { user: true } },
-        // Dernière tentative de paiement : la console en tire le lien et le statut
-        payments: { orderBy: { createdAt: 'desc' }, take: 1 },
+        // Tous les paiements de la course (la console en tire le lien en attente,
+        // le paiement reçu, les doubles paiements et l'historique)
+        payments: { orderBy: { createdAt: 'desc' }, include: PAYMENT_PEOPLE },
       },
     });
   }
@@ -192,6 +203,20 @@ export class BookingsService {
   async updateStatus(id: string, status: BookingStatus): Promise<Booking> {
     const booking = await this.prisma.booking.findUnique({ where: { id } });
     if (!booking) throw new NotFoundException(`Réservation introuvable: ${id}`);
+
+    if (
+      DEPARTURE_STATUSES.includes(status) &&
+      BEFORE_DEPARTURE_STATUSES.includes(booking.status) &&
+      booking.paymentStatus !== 'PAID'
+    ) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'PAYMENT_REQUIRED',
+        message:
+          'Course non payée : départ bloqué. Le paiement doit être reçu (lien PayDunya) ou confirmé par un responsable.',
+        error: 'Conflict',
+      });
+    }
 
     const stamps: Partial<Record<BookingStatus, Prisma.BookingUpdateInput>> = {
       COMPLETED: { completedAt: new Date() },

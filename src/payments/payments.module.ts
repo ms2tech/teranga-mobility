@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
+import { ManualPaymentsService } from './manual-payments.service';
 import { PAYMENT_PROVIDER, PaymentProvider } from './payment-provider.interface';
 import { PaydunyaProvider } from './providers/paydunya.provider';
 
@@ -24,6 +25,7 @@ function createPaymentProvider(config: ConfigService): PaymentProvider {
   controllers: [PaymentsController],
   providers: [
     PaymentsService,
+    ManualPaymentsService,
     {
       provide: PAYMENT_PROVIDER,
       inject: [ConfigService],

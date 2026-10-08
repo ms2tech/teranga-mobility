@@ -129,6 +129,24 @@
   .assignbtn:disabled { opacity:.6; cursor:not-allowed; }
   a.assignbtn { display:inline-block; text-decoration:none; }
   .tag-paid { background:#d6efdd; color:#166534; }
+  /* Paiement : départ bloqué, double paiement, historique, panneau « À régler », dialogues d'action */
+  .blocked { font-size:12.5px; font-weight:700; color:#8a2a05; background:#fde9d9; border:1px solid #f3c9a6; border-radius:var(--radius-sm); padding:7px 10px; }
+  .unpaidnote { font-size:12px; font-weight:600; color:#8a5a00; background:var(--accent-tint); border-radius:var(--radius-sm); padding:6px 10px; }
+  .dupbox { font-size:12.5px; font-weight:700; color:#b3261e; background:#fde4e1; border:1px solid #f1b9b3; border-radius:var(--radius-sm); padding:8px 10px; }
+  .dupbox button { margin-left:6px; }
+  .paidmeta { font-weight:500; font-size:12px; margin-top:3px; color:#1f5e3a; line-height:1.45; }
+  details.hist { font-size:12px; color:var(--muted); }
+  details.hist summary { cursor:pointer; font-weight:600; }
+  .histrow { padding:7px 0; border-top:1px dashed var(--line); line-height:1.5; }
+  .histrow:first-of-type { margin-top:6px; }
+  .histacts { margin-top:5px; display:flex; gap:6px; flex-wrap:wrap; }
+  .countbadge { background:#b3261e; color:#fff; border-radius:999px; padding:0 7px; margin-left:5px; font-size:11px; font-weight:800; }
+  .refundrow { padding:10px 0; border-top:1px dashed var(--line); font-size:13px; display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
+  .refundrow:first-of-type { border-top:none; }
+  .notice { background:var(--accent-tint); color:#6b4a0a; border-radius:var(--radius-sm); padding:9px 12px; font-size:12.5px; margin-bottom:14px; }
+  .btn.danger { background:#b3261e; }
+  .btn.danger:hover { background:#8f1d17; }
+  .dialog #actionExtra { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
   .pay { margin-top:10px; display:flex; flex-direction:column; gap:8px; }
   .paidbox { font-size:12.5px; font-weight:600; color:#166534; background:#d6efdd; border-radius:var(--radius-sm); padding:7px 10px; }
   .paidbox a { color:#166534; }
@@ -147,8 +165,9 @@
   .topbtn { font:inherit; font-size:12px; font-weight:600; cursor:pointer; color:#eaf3f0; background:rgba(255,255,255,.1); border:none; padding:6px 11px; border-radius:999px; }
   .topbtn:hover { background:rgba(255,255,255,.18); }
   .updated { font-size:11.5px; color:var(--faint); font-weight:500; }
-  .overlay { position:fixed; inset:0; z-index:100; background:rgba(14,32,29,.93); display:grid; place-items:center; padding:20px; }
-  .dialog { width:min(400px,100%); background:var(--card); border-radius:var(--radius); box-shadow:0 20px 60px rgba(0,0,0,.35); padding:26px; }
+  /* Le dialogue est centré quand il tient dans la fenêtre ; sinon l'écran défile (margin:auto en flex). */
+  .overlay { position:fixed; inset:0; z-index:100; background:rgba(14,32,29,.93); display:flex; overflow-y:auto; padding:20px; }
+  .dialog { width:min(400px,100%); margin:auto; background:var(--card); border-radius:var(--radius); box-shadow:0 20px 60px rgba(0,0,0,.35); padding:26px; }
   .dialog h2 { margin:0 0 4px; font-size:19px; letter-spacing:-.01em; }
   .dialog .sub { margin:0 0 18px; color:var(--muted); font-size:13.5px; }
   .dialog .field + .field { margin-top:12px; }
@@ -291,7 +310,12 @@
 
     <section class="panel" aria-labelledby="ttl-queue">
       <div class="panel-head"><h2 id="ttl-queue">Courses à venir</h2><span class="updated" id="updated" aria-live="off"></span>
-        <div class="queue-tools"><button class="iconbtn" id="fleetToggle">+ Flotte</button><button class="iconbtn" id="refresh">Actualiser</button></div></div>
+        <div class="queue-tools"><button class="iconbtn hidden" id="refundToggle" type="button">À régler<span class="countbadge hidden" id="refundCount">0</span></button><button class="iconbtn" id="fleetToggle">+ Flotte</button><button class="iconbtn" id="refresh">Actualiser</button></div></div>
+      <div class="fleet hidden" id="refundPanel">
+        <p class="section-label" style="margin-bottom:8px;"><span class="num">!</span> À régler — doubles paiements à rembourser</p>
+        <p class="help" style="margin:0 0 6px;">Ces paiements PayDunya sont arrivés alors que la course était déjà payée. L'argent est à rendre au client (par PayDunya ou autrement), puis à marquer remboursé ici.</p>
+        <div id="refundList"></div>
+      </div>
       <div class="fleet hidden" id="fleetPanel">
         <p class="section-label" style="margin-bottom:12px;"><span class="num">+</span> Ajouter un chauffeur &amp; son véhicule</p>
         <div class="grid">
@@ -308,6 +332,21 @@
       <div id="queue" class="queue"><div class="empty">Chargement…</div></div>
     </section>
   </main>
+
+  <!-- Dialogue d'action (paiement reçu autrement, annulation, remboursement) : construit par openAction().
+       Placé AVANT la connexion dans la page : si la session expire, la connexion passe au-dessus. -->
+  <div class="overlay hidden" id="actionOverlay" role="dialog" aria-modal="true" aria-labelledby="actionTitle">
+    <form class="dialog" id="actionForm">
+      <h2 id="actionTitle"></h2>
+      <p class="sub" id="actionSub"></p>
+      <div class="notice hidden" id="actionNotice"></div>
+      <div id="actionFields"></div>
+      <div id="actionExtra"></div>
+      <button class="btn" id="actionSubmit" type="submit"></button>
+      <button class="linkbtn" id="actionCancel" type="button">Annuler</button>
+      <span class="formmsg" id="actionMsg" role="alert"></span>
+    </form>
+  </div>
 
   <!-- Connexion : affichée par-dessus la page, sans rien perdre de ce qui est saisi derrière -->
   <div class="overlay hidden" id="loginOverlay" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
@@ -350,6 +389,14 @@
   // ── Session et rafraîchissement automatique ─────────────────────────────
   class AuthRequired extends Error {}
   let currentUser = null, timer = null, lastSig = '', lastApi = Date.now(), lastRefreshAt = 0, busy = 0;
+  let lastList = [], lastToRefund = [];   // dernières données affichées (courses, doubles paiements à rembourser)
+
+  // Rôles du personnel. OPERATOR : réservations, affectation, liens, vérification.
+  // MANAGER : + confirmation manuelle « Autre » et panneau « À régler ». ADMIN : + annulation, remboursement.
+  // (Le serveur applique ces règles ; la console ne fait que masquer ce qui serait refusé.)
+  const ROLE_LABEL = { ADMIN: 'Administrateur', MANAGER: 'Responsable', OPERATOR: 'Opérateur' };
+  const isManager = () => !!currentUser && (currentUser.role === 'MANAGER' || currentUser.role === 'ADMIN');
+  const isAdmin = () => !!currentUser && currentUser.role === 'ADMIN';
   const REFRESH_MS = 20000;        // liste des courses : toutes les 20 s, onglet visible
   const KEEPALIVE_MS = 4 * 60000;  // onglet masqué : simple battement pour garder la session ouverte
 
@@ -370,8 +417,9 @@
     $('userbox').classList.toggle('hidden', !currentUser);
     if (currentUser) {
       $('userName').textContent = currentUser.fullName;
-      $('userRole').textContent = currentUser.role === 'ADMIN' ? 'Administrateur' : 'Opérateur';
+      $('userRole').textContent = ROLE_LABEL[currentUser.role] || currentUser.role;
     }
+    renderRefundPanel();
   }
   function showLogin(msg){
     stopTimers(); $('pwOverlay').classList.add('hidden');
@@ -390,7 +438,7 @@
     await refreshAll(true); startTimers();
   }
   function wipeData(){
-    drivers = []; lastSig = '';
+    drivers = []; lastSig = ''; lastList = []; lastToRefund = []; renderRefundPanel(); closeAction();
     $('queue').innerHTML = '<div class="empty">Connecte-toi pour voir les courses.</div>';
     $('updated').textContent = '';
     resetForm();
@@ -469,16 +517,18 @@
   async function refreshAll(force){
     if (!currentUser || (busy > 0 && !force)) return;
     try{
-      const [dr, qr] = await Promise.all([api('/drivers?assignable=true'), api('/bookings/upcoming')]);
+      // Les responsables et admins reçoivent aussi les doubles paiements à rembourser (panneau « À régler »).
+      const [dr, qr, tr] = await Promise.all([api('/drivers?assignable=true'), api('/bookings/upcoming'), isManager() ? api('/payments/to-refund') : null]);
       if (!dr.ok || !qr.ok) throw new Error('HTTP ' + (dr.ok ? qr.status : dr.status));
       const drv = await dr.json(), list = await qr.json();
+      const toRefund = tr && tr.ok ? await tr.json() : [];
       setStatus('ok','API connectée'); lastRefreshAt = Date.now();
       $('updated').textContent = 'Mis à jour à ' + new Date().toLocaleTimeString('fr-FR');
       drivers = drv;
-      const sig = JSON.stringify([drv, list]);
+      const sig = JSON.stringify([drv, list, toRefund]);
       if (!force && sig === lastSig) return;
       if (!force && document.querySelector('#queue .assign-box:not(.hidden)')) return;
-      lastSig = sig; renderQueue(list);
+      lastSig = sig; lastToRefund = toRefund; renderQueue(list); renderRefundPanel();
     }catch(e){
       if (e instanceof AuthRequired) return;
       setStatus('down','API injoignable');
@@ -593,29 +643,73 @@
     return o;
   }
 
-  // Bloc paiement d'une course : payée, lien à envoyer, ou aucun lien encore.
-  // `payments[0]` est la dernière tentative (voir BookingsService.findUpcoming).
-  function payBlock(b){
-    const p=(b.payments&&b.payments[0])||null;
-    if(b.paymentStatus==='PAID'){
-      const rec=p?safeUrl(p.receiptUrl):'';
-      return `<div class="pay"><div class="paidbox">Paiement reçu ✓${rec?` · <a href="${esc(rec)}" target="_blank" rel="noopener noreferrer">Reçu</a>`:''}</div></div>`;
-    }
-    const url=(p&&p.status==='PENDING')?safeUrl(p.paymentUrl):'';
-    if(!url){
-      return `<div class="pay"><div><button class="assignbtn" data-action="paylink">Lien de paiement</button></div><span class="paymsg" role="status"></span></div>`;
-    }
-    return `<div class="pay">
-      <div class="paylink"><input class="payurl" type="text" readonly value="${esc(url)}" aria-label="Lien de paiement" /><button class="assignbtn" data-action="copy">Copier</button></div>
+  // ── Bloc paiement d'une course ─────────────────────────────────────────
+  // `b.payments` : tous les paiements de la course, du plus récent au plus ancien
+  // (voir BookingsService.findUpcoming). Une ligne n'est jamais modifiée ni supprimée :
+  // les annulations et remboursements s'y ajoutent, avec leur auteur et leur motif.
+  const PAY_LABEL = { PENDING:'En attente', PAID:'Payé', FAILED:'Échoué', REFUNDED:'Remboursé', CANCELLED:'Annulé' };
+  const BEFORE_DEPARTURE = ['PENDING','CONFIRMED','ASSIGNED'];
+  const fmtDT = (iso) => iso ? new Date(iso).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+  const paymentsOf = (b) => Array.isArray(b.payments) ? b.payments : [];
+
+  function paidBox(p){
+    const rec = safeUrl(p.receiptUrl), manual = p.source === 'MANUAL';
+    const who = manual ? `Confirmé par ${esc(p.confirmedBy ? p.confirmedBy.fullName : '—')} · ${esc(fmtDT(p.confirmedAt))}` : 'Payé via PayDunya';
+    return `<div class="paidbox">Paiement reçu ✓ · ${manual ? 'reçu autrement' : 'PayDunya'}${rec ? ` · <a href="${esc(rec)}" target="_blank" rel="noopener noreferrer">Reçu</a>` : ''}
+      <div class="paidmeta">${who}${p.reference ? ` · réf. ${esc(p.reference)}` : ''}${p.note ? `<br>${esc(p.note)}` : ''}</div></div>`;
+  }
+  function dupBox(d){
+    return `<div class="dupbox">Double paiement : ${esc(money(d.amountFcfa))} reçus en plus via PayDunya, à rembourser.${isAdmin() ? `<button class="assignbtn" data-action="refund" data-payment="${esc(d.id)}">Rembourser…</button>` : ''}</div>`;
+  }
+  function linkBlock(b, ps){
+    const pend = ps.find(p => p.source === 'GATEWAY' && p.status === 'PENDING' && safeUrl(p.paymentUrl));
+    if (!pend) return `<div><button class="assignbtn" data-action="paylink">Lien de paiement</button></div>`;
+    const url = safeUrl(pend.paymentUrl);
+    return `<div class="paylink"><input class="payurl" type="text" readonly value="${esc(url)}" aria-label="Lien de paiement" /><button class="assignbtn" data-action="copy">Copier</button></div>
       <div class="payactions">
         <a class="assignbtn wabtn" href="${esc(whatsappLink(b,url))}" target="_blank" rel="noopener noreferrer">Envoyer par WhatsApp</a>
-        <button class="assignbtn" data-action="check" data-payment="${esc(p.id)}">Vérifier le paiement</button>
-      </div>
-      <span class="paymsg" role="status"></span></div>`;
+        <button class="assignbtn" data-action="check" data-payment="${esc(pend.id)}">Vérifier le paiement</button>
+      </div>`;
+  }
+  function histRow(p){
+    const l = [`${esc(fmtDT(p.createdAt))} · ${p.source === 'MANUAL' ? 'Reçu autrement' : 'PayDunya'} · <b>${esc(PAY_LABEL[p.status] || p.status)}</b> · ${esc(money(p.amountFcfa))}${p.isDuplicate ? ' · <b>double paiement</b>' : ''}`];
+    if (p.source === 'MANUAL' && p.confirmedBy) l.push(`Confirmé par ${esc(p.confirmedBy.fullName)} le ${esc(fmtDT(p.confirmedAt))}${p.reference ? ` · réf. ${esc(p.reference)}` : ''}`);
+    if (p.note) l.push(esc(p.note));
+    if (p.voidedAt) l.push(`Annulé par ${esc(p.voidedBy ? p.voidedBy.fullName : '—')} le ${esc(fmtDT(p.voidedAt))} : ${esc(p.voidReason)}`);
+    if (p.refundedAt) l.push(`Remboursé par ${esc(p.refundedBy ? p.refundedBy.fullName : '—')} le ${esc(fmtDT(p.refundedAt))} : ${esc(p.refundReason)} (réf. ${esc(p.refundReference)})`);
+    let acts = '';
+    if (isAdmin() && p.status === 'PAID') {
+      acts = (p.source === 'MANUAL' ? `<button class="assignbtn" data-action="void" data-payment="${esc(p.id)}">Annuler cette confirmation…</button>` : '')
+           + `<button class="assignbtn" data-action="refund" data-payment="${esc(p.id)}">Rembourser…</button>`;
+    }
+    return `<div class="histrow">${l.join('<br>')}${acts ? `<div class="histacts">${acts}</div>` : ''}</div>`;
+  }
+  function payBlock(b){
+    const ps = paymentsOf(b);
+    const paid = ps.find(p => p.status === 'PAID' && !p.isDuplicate);
+    const dups = ps.filter(p => p.status === 'PAID' && p.isDuplicate);
+    let h = '';
+    if (b.paymentStatus === 'PAID') {
+      h += paid ? paidBox(paid) : '<div class="paidbox">Paiement reçu ✓</div>';
+    } else {
+      // Une course non payée ne part pas : le chauffeur peut être affecté, mais pas « en route ».
+      if (BEFORE_DEPARTURE.includes(b.status)) h += '<div class="blocked">En attente de paiement, départ bloqué</div>';
+      else if (b.status === 'EN_ROUTE' || b.status === 'IN_PROGRESS') h += '<div class="unpaidnote">Course en cours, non payée</div>';
+      else if (b.status === 'COMPLETED') h += '<div class="unpaidnote">Course terminée, non payée</div>';
+      if (b.paymentStatus === 'REFUNDED') h += '<div class="unpaidnote">Paiement remboursé</div>';
+      h += linkBlock(b, ps);
+      if (isManager()) h += '<div><button class="assignbtn" data-action="manual">Paiement reçu autrement…</button></div>';
+    }
+    h += dups.map(dupBox).join('');
+    if (ps.length) h += `<details class="hist"><summary>Historique des paiements (${ps.length})</summary>${ps.map(histRow).join('')}</details>`;
+    return `<div class="pay">${h}<span class="paymsg" role="status"></span></div>`;
   }
   function setPayMsg(card,t,isErr){ const m=card&&card.querySelector('.paymsg'); if(m){ m.textContent=t; m.className='paymsg'+(isErr?' err':''); } }
 
   function renderQueue(list){
+      lastList = list;
+      // Un historique ouvert reste ouvert quand la liste est redessinée.
+      const openIds = new Set([...document.querySelectorAll('#queue details[open]')].map(d => d.closest('.qcard') && d.closest('.qcard').dataset.id));
       const q=$('queue'); if(!list.length){ q.innerHTML='<div class="empty">Aucune course à venir.</div>'; return; }
       q.innerHTML=list.map(b=>{
         const now=b.isImmediate?'<span class="tag tag-now">Immédiat</span>':'';
@@ -639,6 +733,7 @@
           ${payBlock(b)}
         </div>`;
       }).join('');
+      q.querySelectorAll('.qcard').forEach(c => { if (openIds.has(c.dataset.id)) { const d = c.querySelector('details.hist'); if (d) d.open = true; } });
   }
 
   // Actions sur une course : affectation, lien de paiement, copie, vérification (délégation d'événements)
@@ -651,6 +746,9 @@
 
   async function runAction(btn, card, id, act){
     if(act==='toggle'){ card.querySelector('.assign-box').classList.toggle('hidden'); return; }
+    if(act==='manual'){ openManualDialog(id); return; }
+    if(act==='void'){ openVoidDialog(btn.dataset.payment); return; }
+    if(act==='refund'){ openRefundDialog(btn.dataset.payment); return; }
 
     if(act==='confirm'){
       const sel=card.querySelector('.assign-select'); if(!sel||!sel.value)return;
@@ -692,6 +790,140 @@
       }catch(err){ setPayMsg(card,'Échec : '+err.message,true); btn.disabled=false; }
     }
   }
+
+  // ── Dialogue d'action générique ────────────────────────────────────────
+  // Construit avec createElement + textContent : aucune donnée n'est insérée en HTML.
+  let actionHandler = null, actionInputs = {};
+  const setActionMsg = (t, isErr) => { const m = $('actionMsg'); m.textContent = t; m.className = 'formmsg' + (isErr ? ' err' : ''); };
+  function closeAction(){ $('actionOverlay').classList.add('hidden'); actionHandler = null; actionInputs = {}; }
+  function openAction(cfg){
+    $('actionTitle').textContent = cfg.title; $('actionSub').textContent = cfg.sub || '';
+    const notice = $('actionNotice'); notice.textContent = cfg.notice || ''; notice.classList.toggle('hidden', !cfg.notice);
+    const fields = $('actionFields'); fields.replaceChildren(); actionInputs = {};
+    for (const f of cfg.fields) {
+      const wrap = document.createElement('div'); wrap.className = 'field';
+      const lab = document.createElement('label'); lab.textContent = f.label; lab.htmlFor = 'act_' + f.key; wrap.appendChild(lab);
+      const el = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
+      if (f.type === 'textarea') el.rows = f.rows || 3; else el.type = f.type || 'text';
+      el.id = 'act_' + f.key; el.name = f.key; el.autocomplete = 'off';
+      if (f.required) el.required = true;
+      if (f.minLength) el.minLength = f.minLength;
+      if (f.maxLength) el.maxLength = f.maxLength;
+      if (f.placeholder) el.placeholder = f.placeholder;
+      if (f.value) el.value = f.value;
+      if (f.max) el.max = f.max;
+      wrap.appendChild(el);
+      if (f.help) { const h = document.createElement('span'); h.className = 'help'; h.textContent = f.help; wrap.appendChild(h); }
+      fields.appendChild(wrap); actionInputs[f.key] = el;
+    }
+    const extra = $('actionExtra'); extra.replaceChildren();
+    for (const x of cfg.extra || []) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'assignbtn'; b.textContent = x.label;
+      b.addEventListener('click', async ()=>{ b.disabled = true; try{ await x.onClick({ setMsg: setActionMsg, close: closeAction }); }catch(err){ if (!(err instanceof AuthRequired)) setActionMsg(err.message, true); } finally{ b.disabled = false; } });
+      extra.appendChild(b);
+    }
+    const sub = $('actionSubmit'); sub.textContent = cfg.submitLabel; sub.className = 'btn' + (cfg.danger ? ' danger' : '');
+    setActionMsg(''); actionHandler = cfg.onSubmit;
+    $('actionOverlay').classList.remove('hidden');
+    const first = fields.querySelector('input,textarea'); if (first) first.focus();
+  }
+  $('actionCancel').addEventListener('click', closeAction);
+  document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape' && !$('actionOverlay').classList.contains('hidden')) closeAction(); });
+  $('actionForm').addEventListener('submit', async (e)=>{
+    e.preventDefault(); if (!actionHandler) return;
+    const values = {}; for (const k in actionInputs) values[k] = actionInputs[k].value.trim();
+    const btn = $('actionSubmit'); btn.disabled = true; setActionMsg('Enregistrement…');
+    try{ await actionHandler(values); closeAction(); await refreshAll(true); }
+    catch(err){ if (err instanceof AuthRequired) setActionMsg(''); else setActionMsg(err instanceof TypeError ? 'Serveur injoignable.' : err.message, true); }
+    finally{ btn.disabled = false; }
+  });
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const localInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const JSON_HEADERS = { 'Content-Type': 'application/json' };
+  async function postJson(path, body){
+    const r = await api(path, { method:'POST', headers: JSON_HEADERS, body: JSON.stringify(body || {}) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(apiError(d));
+    return d;
+  }
+  function findPayment(id){
+    for (const b of lastList) { const p = paymentsOf(b).find(x => x.id === id); if (p) return { b, p, ref: b.reference, amount: p.amountFcfa }; }
+    const t = lastToRefund.find(x => x.id === id);
+    return t ? { p: t, ref: t.booking.reference, amount: t.amountFcfa } : null;
+  }
+
+  // Paiement reçu autrement (MANAGER, ADMIN) : « Autre », montant = total de la course, note obligatoire.
+  function openManualDialog(bookingId){
+    const b = lastList.find(x => x.id === bookingId); if (!b) return;
+    const pend = paymentsOf(b).find(p => p.source === 'GATEWAY' && p.status === 'PENDING');
+    openAction({
+      title: 'Paiement reçu autrement',
+      sub: `${b.reference} — ${money(b.totalPriceFcfa)} (montant de la course, non modifiable)`,
+      notice: pend ? `Un lien PayDunya est en attente (créé le ${fmtDT(pend.createdAt)}). Le client pourrait encore le payer : prévenez-le de ne plus l'utiliser, ou vérifiez d'abord son état.` : '',
+      extra: pend ? [{ label: 'Vérifier le paiement PayDunya', onClick: async ({ setMsg, close }) => {
+        setMsg('Vérification auprès de PayDunya…');
+        const p = await postJson(`/payments/${encodeURIComponent(pend.id)}/check`);
+        if (p.status === 'PAID') { close(); await refreshAll(true); }
+        else setMsg(p.status === 'FAILED' ? 'Le lien a échoué ou a été annulé.' : 'Pas encore payé via PayDunya.');
+      } }] : [],
+      fields: [
+        { key:'note', label:"Comment l'argent a-t-il été reçu ?", type:'textarea', required:true, minLength:5, maxLength:500, placeholder:'Ex. espèces remises au bureau, Wave reçu sur notre numéro…' },
+        { key:'reference', label:'Référence (facultatif)', type:'text', maxLength:120, placeholder:'N° de transaction, de reçu…', help:'Une même référence ne peut servir qu\'une fois.' },
+        { key:'receivedAt', label:'Date et heure de réception', type:'datetime-local', value: localInput(new Date()), max: localInput(new Date()) },
+      ],
+      submitLabel: `Confirmer ${money(b.totalPriceFcfa)} reçus`,
+      onSubmit: async (v) => {
+        const body = { note: v.note };
+        if (v.reference) body.reference = v.reference;
+        if (v.receivedAt) body.receivedAt = new Date(v.receivedAt).toISOString();
+        await postJson(`/payments/bookings/${encodeURIComponent(bookingId)}/manual`, body);
+      },
+    });
+  }
+  // Annulation d'une confirmation manuelle (ADMIN) : la ligne est conservée, avec le motif.
+  function openVoidDialog(paymentId){
+    const f = findPayment(paymentId); if (!f) return;
+    openAction({
+      title: 'Annuler cette confirmation',
+      sub: `${f.ref} — ${money(f.amount)} confirmés par ${f.p.confirmedBy ? f.p.confirmedBy.fullName : '—'}`,
+      notice: "La ligne reste dans l'historique, avec votre nom et le motif. La course redevient non payée : son départ est de nouveau bloqué.",
+      fields: [{ key:'reason', label:'Motif (obligatoire)', type:'textarea', required:true, minLength:10, maxLength:500, placeholder:'Ex. mauvaise course, argent finalement non reçu…' }],
+      submitLabel: 'Annuler la confirmation', danger: true,
+      onSubmit: async (v) => { await postJson(`/payments/${encodeURIComponent(paymentId)}/void`, { reason: v.reason }); },
+    });
+  }
+  // Remboursement fait à la main (ADMIN) : on enregistre le motif et la référence du remboursement.
+  function openRefundDialog(paymentId){
+    const f = findPayment(paymentId); if (!f) return;
+    openAction({
+      title: 'Marquer comme remboursé',
+      sub: `${f.ref} — ${money(f.amount)}`,
+      notice: "Le remboursement se fait hors de l'application (PayDunya, Wave, espèces…). Enregistrez-le ici une fois fait.",
+      fields: [
+        { key:'reason', label:'Motif (obligatoire)', type:'textarea', required:true, minLength:10, maxLength:500, placeholder:'Ex. double paiement du lien PayDunya…' },
+        { key:'reference', label:'Référence du remboursement (obligatoire)', type:'text', required:true, minLength:3, maxLength:120, placeholder:'N° de transaction, de reçu…' },
+      ],
+      submitLabel: 'Marquer remboursé', danger: true,
+      onSubmit: async (v) => { await postJson(`/payments/${encodeURIComponent(paymentId)}/refund`, { reason: v.reason, reference: v.reference }); },
+    });
+  }
+
+  // Panneau « À régler » (MANAGER, ADMIN) : doubles paiements à rembourser.
+  function renderRefundPanel(){
+    const manager = isManager(), n = lastToRefund.length;
+    $('refundToggle').classList.toggle('hidden', !manager);
+    const c = $('refundCount'); c.textContent = String(n); c.classList.toggle('hidden', n === 0);
+    if (!manager) { $('refundPanel').classList.add('hidden'); return; }
+    $('refundList').innerHTML = n ? lastToRefund.map(x => {
+      const cl = x.booking.client;
+      return `<div class="refundrow"><div><b>${esc(x.booking.reference)}</b>${cl ? ` · ${esc(cl.fullName)} · ${esc(cl.phone)}` : ''}</div>
+        <div>${esc(money(x.amountFcfa))} reçus en double via PayDunya le ${esc(fmtDT(x.paidAt))}${safeUrl(x.receiptUrl) ? ` · <a href="${esc(safeUrl(x.receiptUrl))}" target="_blank" rel="noopener noreferrer">Reçu</a>` : ''}</div>
+        ${isAdmin() ? `<button class="assignbtn" data-refund="${esc(x.id)}">Marquer remboursé…</button>` : '<span class="paymsg">Le remboursement est réservé à un administrateur.</span>'}</div>`;
+    }).join('') : '<div class="empty">Rien à régler.</div>';
+  }
+  $('refundToggle').addEventListener('click', ()=>$('refundPanel').classList.toggle('hidden'));
+  $('refundList').addEventListener('click', (e)=>{ const b = e.target.closest('[data-refund]'); if (b) openRefundDialog(b.dataset.refund); });
 
   function setMsg(t,k){ const m=$('formmsg'); m.textContent=t; m.className='formmsg '+(k||''); }
   async function submit(){
@@ -777,7 +1009,7 @@
       }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const { user } = await r.json();
-      if (user.role !== 'ADMIN' && user.role !== 'OPERATOR') { setStatus('', 'Non connecté'); showLogin('Ce compte n\'a pas accès à la console.'); return; }
+      if (!ROLE_LABEL[user.role]) { setStatus('', 'Non connecté'); showLogin('Ce compte n\'a pas accès à la console.'); return; }
       await startSession(user);
     }catch(e){
       setStatus('down','API injoignable');

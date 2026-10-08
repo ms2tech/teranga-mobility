@@ -16,8 +16,9 @@ datasource db {
 // ── Énumérations ────────────────────────────────────────────────────────
 
 enum UserRole {
-  ADMIN // accès complet, configuration, finances
-  OPERATOR // centrale téléphonique : crée/gère les réservations
+  ADMIN // tout, plus : annuler une confirmation, rembourser, corriger un prix, tarifs, comptes du personnel
+  MANAGER // responsable des opérations : tout l'OPERATOR + confirmation manuelle d'un paiement + panneau « À régler »
+  OPERATOR // centrale téléphonique : réservations, affectation, liens de paiement, vérification
   DRIVER // chauffeur partenaire
   CLIENT // compte client (optionnel — beaucoup réservent par téléphone)
 }
@@ -81,6 +82,7 @@ enum PaymentMethod {
   ORANGE_MONEY
   CASH
   CARD
+  OTHER // seule option d'une confirmation manuelle : l'argent est reçu, la note dit comment
 }
 
 enum PaymentStatus {
@@ -88,6 +90,13 @@ enum PaymentStatus {
   PAID
   FAILED
   REFUNDED
+  CANCELLED // lien remplacé par une confirmation manuelle, ou confirmation manuelle annulée par un admin
+}
+
+// D'où vient l'encaissement : l'agrégateur (PayDunya) ou une confirmation manuelle.
+enum PaymentSource {
+  GATEWAY
+  MANUAL
 }
 
 enum PayoutStatus {
@@ -133,6 +142,9 @@ model User {
   clientProfile    Client?
   bookingsCreated  Booking[] @relation("BookingCreatedBy")
   sessions         Session[]
+  paymentsConfirmed Payment[] @relation("PaymentConfirmedBy")
+  paymentsVoided    Payment[] @relation("PaymentVoidedBy")
+  paymentsRefunded  Payment[] @relation("PaymentRefundedBy")
 
   @@index([role])
 }
@@ -318,24 +330,57 @@ model Booking {
   @@index([driverId])
 }
 
-// Tentative d'encaissement client (via agrégateur : Wave / Orange Money / carte).
-// Une réservation peut en avoir plusieurs (lien expiré, paiement échoué, etc.).
+// Encaissement client : tentative via l'agrégateur (PayDunya) ou confirmation
+// manuelle (source MANUAL, toujours method OTHER). Une réservation peut en avoir
+// plusieurs (lien expiré, paiement échoué, confirmation annulée puis refaite…).
+//
+// Les lignes ne sont JAMAIS modifiées dans leur montant ni supprimées : une
+// erreur se corrige par une annulation (voided*) ou un remboursement (refunded*),
+// avec motif et auteur, et l'historique reste complet. Aucun chauffeur n'encaisse :
+// tout l'argent est reçu par la société, qui reverse ensuite sa part au chauffeur.
 model Payment {
   id          String         @id @default(cuid())
   bookingId   String
   booking     Booking        @relation(fields: [bookingId], references: [id])
-  amountFcfa  Int
-  method      PaymentMethod? // connu seulement après le paiement
-  provider    String? // ex. "PAYDUNYA", "SENEPAY"
+  amountFcfa  Int // toujours égal au total de la course (pas de paiement partiel)
+  method      PaymentMethod? // connu seulement après le paiement ; OTHER pour une confirmation manuelle
+  source      PaymentSource  @default(GATEWAY)
+  provider    String? // ex. "PAYDUNYA", "SENEPAY" ; null pour une confirmation manuelle
   providerRef String?        @unique // token de facture côté agrégateur
   paymentUrl  String? // lien de paiement envoyé au client
   receiptUrl  String? // reçu fourni par l'agrégateur
   status      PaymentStatus  @default(PENDING)
-  paidAt      DateTime?
+  paidAt      DateTime? // date de réception de l'argent
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
+  // Confirmation manuelle
+  reference     String? // facultative (n° de transaction, de reçu…) ; unique si renseignée, parmi les paiements non annulés
+  note          String? // obligatoire pour une confirmation manuelle : comment l'argent a été reçu
+  confirmedById String?
+  confirmedBy   User?     @relation("PaymentConfirmedBy", fields: [confirmedById], references: [id])
+  confirmedAt   DateTime?
+
+  // Annulation d'une confirmation manuelle (ADMIN)
+  voidedById String?
+  voidedBy   User?     @relation("PaymentVoidedBy", fields: [voidedById], references: [id])
+  voidedAt   DateTime?
+  voidReason String?
+
+  // Remboursement fait à la main (ADMIN), hors application
+  refundedById    String?
+  refundedBy      User?     @relation("PaymentRefundedBy", fields: [refundedById], references: [id])
+  refundedAt      DateTime?
+  refundReason    String?
+  refundReference String?
+
+  // Argent reçu alors que la course était déjà payée (ex. lien PayDunya payé après
+  // une confirmation manuelle) : la ligne est PAID, ne touche pas la course, et doit
+  // être remboursée.
+  isDuplicate Boolean @default(false)
+
   @@index([bookingId])
+  @@index([reference])
 }
 
 // Reversement de la part chauffeur (Wave Bulk Pay, lots)

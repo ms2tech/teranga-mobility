@@ -75,14 +75,30 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
 - **Paiement** : « Lien de paiement » par course (affichage, copie, envoi par
   WhatsApp au proche ou, à défaut, au passager), badge **Payé**, et
   « Vérifier le paiement » si la notification n'est pas arrivée.
+- **Une course non payée ne part pas** : le chauffeur peut être affecté à l'avance,
+  mais la course affiche « En attente de paiement, départ bloqué » et l'API refuse
+  le passage à `EN_ROUTE` tant qu'elle n'est pas payée.
+- **Paiement reçu autrement** (responsables et admins) : confirme que l'argent est
+  reçu par la société (note obligatoire, référence facultative) et débloque la
+  course. L'**historique des paiements** de chaque course montre tout, annulations
+  et remboursements compris. Un **admin** peut annuler une confirmation (motif
+  obligatoire) ou marquer un remboursement.
+- **« À régler »** (responsables et admins) : les doubles paiements PayDunya à
+  rembourser, avec un compteur rouge.
 - **Flotte** : ajout d'un chauffeur avec son véhicule.
 
 ---
 
 ## Connexion (authentification)
 
-- **Qui** : le personnel (`ADMIN` et `OPERATOR`), par e-mail + mot de passe. Les
-  rôles `CLIENT` et `DRIVER` existent mais n'ont accès à aucune route d'opérateur.
+- **Qui** : le personnel, par e-mail + mot de passe, avec trois rôles :
+  - `OPERATOR` : réservations, affectation, liens de paiement, vérification d'un paiement ;
+  - `MANAGER` (responsable des opérations) : tout l'OPERATOR, plus la confirmation
+    manuelle d'un paiement et le panneau « À régler » ;
+  - `ADMIN` : tout, plus l'annulation d'une confirmation, le remboursement (et, plus
+    tard, la correction de prix, les tarifs et les comptes).
+
+  Les rôles `CLIENT` et `DRIVER` existent mais n'ont accès à aucune route du personnel.
 - **Comment** : un jeton de session aléatoire, porté par un cookie `tm_session`
   (`HttpOnly`, `SameSite=Lax`, `Secure` en production). Seul son hash SHA-256 est
   stocké en base (table `Session`). Une déconnexion, un compte désactivé ou un
@@ -92,7 +108,7 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   l'écran de connexion s'ouvre par-dessus la page sans rien perdre de la saisie.
 - **Mots de passe** : argon2id, 10 caractères minimum.
 - **Tout est protégé par défaut.** Sans mention contraire, une route exige une
-  session `ADMIN` ou `OPERATOR` (garde global `AuthGuard`). Une route publique doit
+  session `ADMIN`, `MANAGER` ou `OPERATOR` (garde global `AuthGuard`). Une route publique doit
   porter `@Public()`, une route d'un autre rôle `@Roles(...)`. Seules sont
   publiques : `POST /api/auth/login`, `POST /api/auth/logout`, l'IPN PayDunya
   (`POST /api/payments/paydunya/ipn`, protégé par son hash puis reconfirmé auprès de
@@ -111,7 +127,7 @@ Script interactif, à lancer dans un vrai terminal (PowerShell, Windows Terminal
 sous Git Bash, préfixer par `winpty`). Le mot de passe est saisi masqué, jamais
 en argument ni dans un fichier.
 
-- **Créer** un compte `ADMIN` ou `OPERATOR` (e-mail, nom, téléphone, rôle). Si le
+- **Créer** un compte `ADMIN`, `MANAGER` ou `OPERATOR` (e-mail, nom, téléphone, rôle). Si le
   téléphone est celui d'un compte du seed sans e-mail (ex. « Admin Téranga »), le
   script propose de le reprendre au lieu de créer un doublon.
 - **Réinitialiser le mot de passe** d'un compte existant (ses sessions ouvertes
@@ -146,6 +162,44 @@ Une réservation peut avoir plusieurs tentatives de paiement. Configuration :
 `PAYDUNYA_PRIVATE_KEY`, `PAYDUNYA_TOKEN`, `PAYDUNYA_STORE_NAME` et
 `PAYDUNYA_IPN_URL` — **cette URL doit inclure le préfixe `/api`**
 (ex. `https://<domaine>/api/payments/paydunya/ipn`).
+
+### Paiement reçu autrement (confirmation manuelle)
+
+Quand le client paie sans passer par le lien (espèces au bureau, Wave ou Orange
+Money envoyé à notre numéro, virement…), un **responsable ou un admin** confirme que
+l'argent est reçu : `POST /api/payments/bookings/:bookingId/manual`.
+
+- **Une seule option, « Autre »** (`method=OTHER`, `source=MANUAL`) : une **note**
+  obligatoire dit comment l'argent a été reçu, une **référence** est facultative
+  (unique si elle est renseignée, parmi les paiements non annulés), la date de
+  réception ne peut pas être dans le futur.
+- **Le montant est toujours le total de la course** : pas de paiement partiel, rien à
+  saisir. La course passe à `PAID` (jamais de changement de `Booking.status`) et son
+  départ est débloqué.
+- **Qui a confirmé et quand** sont enregistrés. Les liens PayDunya encore en attente
+  sont abandonnés chez nous (`CANCELLED`) : PayDunya ne permet pas de les annuler.
+- **Les chauffeurs n'encaissent jamais.** Tout l'argent est reçu par la société, qui
+  reverse ensuite au chauffeur sa part (`driverPayoutFcfa`).
+
+**Corrections, sans jamais effacer l'historique** : une ligne `Payment` n'est ni
+modifiée ni supprimée (aucune route `DELETE`).
+- `POST /api/payments/:id/void` (**admin**, motif obligatoire) annule une
+  confirmation manuelle ; la course redevient non payée. Corriger = annuler, puis
+  confirmer de nouveau (nouvelle ligne). Un paiement PayDunya ne s'annule pas : il se
+  rembourse.
+- `POST /api/payments/:id/refund` (**admin**, motif et référence obligatoires) marque
+  un remboursement fait à la main, hors application.
+
+**Double paiement** : si un lien PayDunya est payé alors que la course est déjà payée,
+l'IPN enregistre l'argent reçu (`PAID` avec `isDuplicate`) sans toucher à la course.
+Le panneau « À régler » (`GET /api/payments/to-refund`) le liste jusqu'à ce qu'un admin
+le marque remboursé. Le premier paiement valide gagne, même en cas de confirmations ou
+d'IPN simultanés.
+
+**Départ bloqué** : `PATCH /api/bookings/:id/status` refuse `EN_ROUTE` (et
+`IN_PROGRESS` depuis un état d'avant le départ) tant que la course n'est pas payée,
+avec `409` et le code `PAYMENT_REQUIRED`. `COMPLETED`, `NO_SHOW` et `CANCELLED` ne sont
+jamais bloqués : ils enregistrent ce qui s'est passé.
 
 ---
 
@@ -186,10 +240,10 @@ d'environnement — modifiables sans toucher au code.
 | `POST`  | `/api/pricing/quote`                      | Devis instantané (détail ligne à ligne)      |
 | `POST`  | `/api/pricing/estimate`                   | Devis à partir de deux adresses (Google Maps)|
 | `POST`  | `/api/bookings`                           | Créer une réservation                        |
-| `GET`   | `/api/bookings/upcoming`                  | File des courses à venir (avec dernier paiement) |
+| `GET`   | `/api/bookings/upcoming`                  | File des courses à venir (avec tous leurs paiements) |
 | `GET`   | `/api/bookings/:id`                       | Détail d'une réservation                     |
 | `PATCH` | `/api/bookings/:id/assign`                | Affecter chauffeur + véhicule                |
-| `PATCH` | `/api/bookings/:id/status`                | Changer le statut                            |
+| `PATCH` | `/api/bookings/:id/status`                | Changer le statut (`EN_ROUTE` refusé si non payée) |
 | `GET`   | `/api/drivers`                            | Chauffeurs (`?assignable=true` : affectables)|
 | `POST`  | `/api/drivers`                            | Créer un chauffeur                           |
 | `PATCH` | `/api/drivers/:id/status`                 | Changer le statut d'un chauffeur             |
@@ -197,14 +251,20 @@ d'environnement — modifiables sans toucher au code.
 | `POST`  | `/api/vehicles`                           | Créer un véhicule                            |
 | `POST`  | `/api/payments/bookings/:bookingId/link`  | Générer un lien de paiement                  |
 | `POST`  | `/api/payments/:id/check`                 | Vérifier un paiement auprès de PayDunya      |
+| `GET`   | `/api/payments/bookings/:bookingId`       | Historique complet des paiements d'une course |
+| `POST`  | `/api/payments/bookings/:bookingId/manual`| Confirmer un paiement reçu autrement (**MANAGER, ADMIN**) |
+| `GET`   | `/api/payments/to-refund`                 | Doubles paiements à rembourser (**MANAGER, ADMIN**) |
+| `POST`  | `/api/payments/:id/void`                  | Annuler une confirmation manuelle (**ADMIN**, motif) |
+| `POST`  | `/api/payments/:id/refund`                | Marquer un remboursement (**ADMIN**, motif et référence) |
 | `POST`  | `/api/payments/paydunya/ipn`              | Notification de paiement (appelée par PayDunya, **publique**) |
 | `POST`  | `/api/auth/login`                         | Connexion (**publique**, 10 essais/min par IP) |
 | `POST`  | `/api/auth/logout`                        | Déconnexion (**publique**, sans erreur possible) |
 | `GET`   | `/api/auth/me`                            | Utilisateur connecté (tout rôle)             |
 | `POST`  | `/api/auth/change-password`               | Changer son mot de passe (tout rôle)         |
 
-> Toutes les routes exigent une session `ADMIN` ou `OPERATOR`, sauf celles marquées
-> **publiques**. Voir « Connexion ».
+> Toutes les routes exigent une session `ADMIN`, `MANAGER` ou `OPERATOR`, sauf celles
+> marquées **publiques** ; certaines demandent un rôle plus élevé (indiqué). Voir
+> « Connexion ».
 
 ### Exemple — devis
 
@@ -236,7 +296,8 @@ src/
   bookings/                réservations (service + controller + DTO)
   drivers/                 chauffeurs (création, liste, statut)
   vehicles/                véhicules
-  payments/                paiement : interface PaymentProvider, fournisseur PayDunya, IPN
+  payments/                paiement : interface PaymentProvider, fournisseur PayDunya, IPN,
+                           confirmations manuelles, annulations, remboursements
 prisma/
   schema.prisma            modèle de données
   migrations/              historique des migrations
@@ -249,12 +310,12 @@ prisma/
 ## Prochaines étapes
 
 **Avant la production**
-- [x] Authentification du personnel (sessions, rôles ADMIN / OPERATOR)
+- [x] Authentification du personnel (sessions, rôles ADMIN / MANAGER / OPERATOR)
+- [x] Confirmation manuelle des paiements, annulation, remboursement, double paiement,
+      départ bloqué tant que la course n'est pas payée
+- [ ] Correction du prix d'une course par un admin (avec motif)
+- [ ] Modification des tarifs depuis la console par un admin (aujourd'hui dans `.env`)
 - [ ] Site et domaine, passage de PayDunya en mode live (URL IPN du vrai serveur)
-
-**Prochain lot**
-- [ ] Confirmation manuelle des paiements (cash, Wave / Orange Money direct,
-      virement) : moyen, référence et opérateur qui a confirmé
 
 **Fondation**
 - [x] Module chauffeurs & véhicules (création, liste, statut)
