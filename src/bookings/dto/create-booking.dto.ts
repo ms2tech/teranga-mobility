@@ -71,5 +71,6 @@ export class CreateBookingDto {
   @IsOptional() @IsInt() @Min(0) accompanimentFeeFcfa?: number;
 
   @IsOptional() @IsString() notes?: string;
-  @IsOptional() @IsString() createdById?: string;
+  // createdById n'existe plus ici : l'auteur de la réservation est l'utilisateur
+  // de la session (il ne doit pas pouvoir être falsifié depuis le corps de la requête).
 }

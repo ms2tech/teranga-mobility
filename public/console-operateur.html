@@ -139,6 +139,22 @@
   .wabtn:hover { background:#c3ecd5; }
   .paymsg { font-size:12px; color:var(--muted); }
   .paymsg.err { color:#c0392b; }
+  /* Session : utilisateur connecté, écrans de connexion et de changement de mot de passe */
+  .userbox { display:flex; align-items:center; gap:10px; }
+  .who-am-i { text-align:right; line-height:1.2; font-size:12.5px; }
+  .who-am-i b { display:block; color:#eaf3f0; font-weight:700; }
+  .who-am-i span { color:#8fc4b7; font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; font-weight:600; }
+  .topbtn { font:inherit; font-size:12px; font-weight:600; cursor:pointer; color:#eaf3f0; background:rgba(255,255,255,.1); border:none; padding:6px 11px; border-radius:999px; }
+  .topbtn:hover { background:rgba(255,255,255,.18); }
+  .updated { font-size:11.5px; color:var(--faint); font-weight:500; }
+  .overlay { position:fixed; inset:0; z-index:100; background:rgba(14,32,29,.93); display:grid; place-items:center; padding:20px; }
+  .dialog { width:min(400px,100%); background:var(--card); border-radius:var(--radius); box-shadow:0 20px 60px rgba(0,0,0,.35); padding:26px; }
+  .dialog h2 { margin:0 0 4px; font-size:19px; letter-spacing:-.01em; }
+  .dialog .sub { margin:0 0 18px; color:var(--muted); font-size:13.5px; }
+  .dialog .field + .field { margin-top:12px; }
+  .dialog .btn { width:100%; margin-top:16px; }
+  .dialog .formmsg { display:block; margin-top:12px; min-height:18px; }
+  .dialog .linkbtn { display:block; margin:12px auto 0; font:inherit; font-size:12.5px; font-weight:600; background:none; border:none; color:var(--muted); cursor:pointer; text-decoration:underline; }
   .fleet { padding:16px 20px; border-bottom:1px solid var(--line-soft); background:#fbfcfb; }
   .fleet .grid { gap:10px; }
   .fleet .fleet-actions { margin-top:12px; display:flex; align-items:center; gap:12px; }
@@ -160,6 +176,11 @@
       </div>
     </div>
     <div class="topbar-right">
+      <div class="userbox hidden" id="userbox">
+        <div class="who-am-i"><b id="userName">—</b><span id="userRole"></span></div>
+        <button class="topbtn" id="pwBtn" type="button">Mot de passe</button>
+        <button class="topbtn" id="logoutBtn" type="button">Se déconnecter</button>
+      </div>
       <div class="clock" id="clock"><strong>—</strong></div>
       <span class="status" id="status"><span class="dot"></span><span id="status-text">Connexion…</span></span>
     </div>
@@ -269,7 +290,7 @@
     </section>
 
     <section class="panel" aria-labelledby="ttl-queue">
-      <div class="panel-head"><h2 id="ttl-queue">Courses à venir</h2>
+      <div class="panel-head"><h2 id="ttl-queue">Courses à venir</h2><span class="updated" id="updated" aria-live="off"></span>
         <div class="queue-tools"><button class="iconbtn" id="fleetToggle">+ Flotte</button><button class="iconbtn" id="refresh">Actualiser</button></div></div>
       <div class="fleet hidden" id="fleetPanel">
         <p class="section-label" style="margin-bottom:12px;"><span class="num">+</span> Ajouter un chauffeur &amp; son véhicule</p>
@@ -288,6 +309,31 @@
     </section>
   </main>
 
+  <!-- Connexion : affichée par-dessus la page, sans rien perdre de ce qui est saisi derrière -->
+  <div class="overlay hidden" id="loginOverlay" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+    <form class="dialog" id="loginForm">
+      <h2 id="loginTitle">Connexion</h2>
+      <p class="sub">Console opérateur — Téranga Mobility</p>
+      <div class="field"><label for="loginEmail">E-mail</label><input id="loginEmail" name="email" type="email" autocomplete="username" required /></div>
+      <div class="field"><label for="loginPassword">Mot de passe</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" required /></div>
+      <button class="btn" id="loginSubmit" type="submit">Se connecter</button>
+      <span class="formmsg" id="loginMsg" role="alert"></span>
+    </form>
+  </div>
+
+  <div class="overlay hidden" id="pwOverlay" role="dialog" aria-modal="true" aria-labelledby="pwTitle">
+    <form class="dialog" id="pwForm" autocomplete="off">
+      <h2 id="pwTitle">Changer le mot de passe</h2>
+      <p class="sub" id="pwSub"></p>
+      <div class="field"><label for="pwCurrent">Mot de passe actuel</label><input id="pwCurrent" type="password" autocomplete="current-password" required /></div>
+      <div class="field"><label for="pwNew">Nouveau mot de passe</label><input id="pwNew" type="password" autocomplete="new-password" minlength="10" required /><span class="help">10 caractères minimum.</span></div>
+      <div class="field"><label for="pwNew2">Confirmer le nouveau mot de passe</label><input id="pwNew2" type="password" autocomplete="new-password" minlength="10" required /></div>
+      <button class="btn" id="pwSubmit" type="submit">Enregistrer</button>
+      <button class="linkbtn" id="pwCancel" type="button">Annuler</button>
+      <span class="formmsg" id="pwMsg" role="alert"></span>
+    </form>
+  </div>
+
 <script>
   const API = '/api';
   const fmt = new Intl.NumberFormat('fr-FR');
@@ -300,6 +346,145 @@
   // Un lien n'est affiché que s'il est en https (pas de javascript:, data:…).
   const safeUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) ? u : '');
   const apiError = (d) => Array.isArray(d.message) ? d.message.join(', ') : (d.message || d.error || 'Erreur');
+
+  // ── Session et rafraîchissement automatique ─────────────────────────────
+  class AuthRequired extends Error {}
+  let currentUser = null, timer = null, lastSig = '', lastApi = Date.now(), lastRefreshAt = 0, busy = 0;
+  const REFRESH_MS = 20000;        // liste des courses : toutes les 20 s, onglet visible
+  const KEEPALIVE_MS = 4 * 60000;  // onglet masqué : simple battement pour garder la session ouverte
+
+  // Tous les appels à l'API passent par ici (le cookie de session part tout seul : même origine).
+  // Un 401 ouvre la connexion PAR-DESSUS la page : rien de ce qui est saisi n'est perdu.
+  async function api(path, opts={}){
+    lastApi = Date.now();
+    const r = await fetch(API+path, { credentials:'same-origin', ...opts });
+    if (r.status === 401) { showLogin('Session expirée : reconnecte-toi pour continuer.'); throw new AuthRequired('Session expirée'); }
+    if (r.status === 403) {
+      const d = await r.clone().json().catch(()=>({}));
+      if (d.code === 'PASSWORD_CHANGE_REQUIRED') { showPassword(true); throw new AuthRequired('Changement de mot de passe requis'); }
+    }
+    return r;
+  }
+
+  function renderUser(){
+    $('userbox').classList.toggle('hidden', !currentUser);
+    if (currentUser) {
+      $('userName').textContent = currentUser.fullName;
+      $('userRole').textContent = currentUser.role === 'ADMIN' ? 'Administrateur' : 'Opérateur';
+    }
+  }
+  function showLogin(msg){
+    stopTimers(); $('pwOverlay').classList.add('hidden');
+    $('loginOverlay').classList.remove('hidden');
+    // Session expirée : l'opérateur n'a plus qu'à retaper son mot de passe.
+    if (!$('loginEmail').value && currentUser && currentUser.email) $('loginEmail').value = currentUser.email;
+    const m = $('loginMsg'); m.textContent = msg || ''; m.className = 'formmsg' + (msg ? ' err' : '');
+    $('loginPassword').value = '';
+    ($('loginEmail').value ? $('loginPassword') : $('loginEmail')).focus();
+  }
+  async function startSession(user){
+    // Un autre utilisateur se connecte par-dessus une session expirée : on efface ce que le précédent avait saisi.
+    if (currentUser && currentUser.id !== user.id) wipeData();
+    currentUser = user; renderUser();
+    if (user.mustChangePassword) { showPassword(true); return; }
+    await refreshAll(true); startTimers();
+  }
+  function wipeData(){
+    drivers = []; lastSig = '';
+    $('queue').innerHTML = '<div class="empty">Connecte-toi pour voir les courses.</div>';
+    $('updated').textContent = '';
+    resetForm();
+    ['fName','fPhone','fReg'].forEach(x=>$(x).value=''); $('fleetPanel').classList.add('hidden');
+  }
+
+  $('loginForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const btn = $('loginSubmit'), m = $('loginMsg'); btn.disabled = true; m.textContent = 'Connexion…'; m.className = 'formmsg';
+    try{
+      const r = await fetch(API+'/auth/login', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ email: $('loginEmail').value.trim(), password: $('loginPassword').value }) });
+      if (r.status === 429) throw new Error('Trop de tentatives : réessaie dans une minute.');
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(r.status === 401 ? 'E-mail ou mot de passe incorrect.' : apiError(d));
+      $('loginPassword').value = ''; m.textContent = ''; $('loginOverlay').classList.add('hidden');
+      await startSession(d.user);
+    }catch(err){
+      m.textContent = err instanceof TypeError ? 'Serveur injoignable.' : err.message; m.className = 'formmsg err';
+      $('loginPassword').value = ''; $('loginPassword').focus();
+    } finally { btn.disabled = false; }
+  });
+
+  $('logoutBtn').addEventListener('click', async ()=>{
+    try{ await fetch(API+'/auth/logout', { method:'POST', credentials:'same-origin' }); }catch(_){}
+    currentUser = null; renderUser(); wipeData(); setStatus('', 'Déconnecté');
+    $('loginEmail').value = ''; showLogin('');
+  });
+
+  // Changement de mot de passe (obligatoire quand le compte a un mot de passe temporaire)
+  let pwForced = false;
+  const setPwMsg = (t, isErr) => { const m = $('pwMsg'); m.textContent = t; m.className = 'formmsg' + (isErr ? ' err' : ''); };
+  function showPassword(forced){
+    pwForced = forced;
+    $('pwTitle').textContent = forced ? 'Choisis ton mot de passe' : 'Changer le mot de passe';
+    $('pwSub').textContent = forced ? 'Ce compte a un mot de passe temporaire : choisis le tien pour continuer.' : '';
+    $('pwCancel').classList.toggle('hidden', forced);
+    ['pwCurrent','pwNew','pwNew2'].forEach(id => $(id).value = ''); setPwMsg('');
+    stopTimers(); $('loginOverlay').classList.add('hidden'); $('pwOverlay').classList.remove('hidden'); $('pwCurrent').focus();
+  }
+  $('pwBtn').addEventListener('click', ()=>showPassword(false));
+  $('pwCancel').addEventListener('click', ()=>{ $('pwOverlay').classList.add('hidden'); if (currentUser && !timer) startTimers(); });
+  $('pwForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    if ($('pwNew').value !== $('pwNew2').value) { setPwMsg('Les deux nouveaux mots de passe diffèrent.', true); return; }
+    const btn = $('pwSubmit'); btn.disabled = true; setPwMsg('Enregistrement…');
+    try{
+      const r = await fetch(API+'/auth/change-password', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ currentPassword: $('pwCurrent').value, newPassword: $('pwNew').value }) });
+      if (r.status === 401) { showLogin('Session expirée : reconnecte-toi pour continuer.'); return; }
+      if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(apiError(d)); }
+      ['pwCurrent','pwNew','pwNew2'].forEach(id => $(id).value = '');
+      if (currentUser) currentUser.mustChangePassword = false;
+      setPwMsg('Mot de passe modifié ✓');
+      setTimeout(async ()=>{ $('pwOverlay').classList.add('hidden'); setPwMsg(''); if (currentUser) { await refreshAll(true); startTimers(); } }, 900);
+    }catch(err){ setPwMsg(err instanceof TypeError ? 'Serveur injoignable.' : err.message, true); }
+    finally { btn.disabled = false; }
+  });
+
+  // Rafraîchissement automatique : maintient aussi la session ouverte tant que la console l'est.
+  function startTimers(){ stopTimers(); timer = setInterval(refreshTick, REFRESH_MS); }
+  function stopTimers(){ if (timer) clearInterval(timer); timer = null; }
+  async function refreshTick(){
+    if (!currentUser) return;
+    if (document.hidden) {
+      if (Date.now() - lastApi > KEEPALIVE_MS) { try{ await api('/auth/me'); }catch(_){} }
+      return;
+    }
+    await refreshAll(false);
+  }
+  // Retour sur l'onglet : mise à jour immédiate, sauf si la liste vient d'être rafraîchie.
+  document.addEventListener('visibilitychange', ()=>{ if (!document.hidden && timer && Date.now() - lastRefreshAt > 5000) refreshAll(false); });
+
+  // Charge chauffeurs + courses. `force` : action de l'opérateur ou premier chargement (toujours redessiner).
+  // Sans `force` : on ne redessine pas si rien n'a changé, ni pendant une action ou un choix de chauffeur.
+  async function refreshAll(force){
+    if (!currentUser || (busy > 0 && !force)) return;
+    try{
+      const [dr, qr] = await Promise.all([api('/drivers?assignable=true'), api('/bookings/upcoming')]);
+      if (!dr.ok || !qr.ok) throw new Error('HTTP ' + (dr.ok ? qr.status : dr.status));
+      const drv = await dr.json(), list = await qr.json();
+      setStatus('ok','API connectée'); lastRefreshAt = Date.now();
+      $('updated').textContent = 'Mis à jour à ' + new Date().toLocaleTimeString('fr-FR');
+      drivers = drv;
+      const sig = JSON.stringify([drv, list]);
+      if (!force && sig === lastSig) return;
+      if (!force && document.querySelector('#queue .assign-box:not(.hidden)')) return;
+      lastSig = sig; renderQueue(list);
+    }catch(e){
+      if (e instanceof AuthRequired) return;
+      setStatus('down','API injoignable');
+      if (force) $('queue').innerHTML = '<div class="empty err">Impossible de joindre l\'API.<br>Vérifie que le serveur tourne (npm run start:dev) puis actualise.</div>';
+    }
+  }
 
   // Numéro au format international sans « + » (exigé par wa.me), ou null si on n'en est pas sûr.
   function waNumber(raw){
@@ -345,12 +530,6 @@
     scheduleQuote();
   });
 
-  async function checkApi(){
-    try{ const r=await fetch(API+'/drivers?assignable=true'); if(!r.ok)throw 0; setStatus('ok','API connectée'); return true; }
-    catch(e){ setStatus('down','API injoignable');
-      $('queue').innerHTML='<div class="empty err">Impossible de joindre l\'API.<br>Vérifie que le serveur tourne (npm run start:dev) puis Actualise.</div>'; return false; }
-  }
-
   let qt=null, estimate=null;
   function scheduleQuote(){ clearTimeout(qt); qt=setTimeout(refreshQuote,220); }
   function emptyQuote(t){ $('quoteBody').innerHTML=`<p class="quote-empty">${esc(t)}</p>`; $('quoteMode').classList.add('hidden'); }
@@ -369,7 +548,7 @@
     if(!pickup||!dropoff){ emptyQuote('Renseigne les deux adresses, puis calcule.'); return; }
     const btn=$('calcBtn'); btn.disabled=true; btn.textContent='Calcul…';
     try{
-      const r=await fetch(API+'/pricing/estimate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      const r=await api('/pricing/estimate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
         pickupAddress:pickup, dropoffAddress:dropoff, serviceType:$('serviceType').value,
         needsWheelchairVehicle:$('wheelchair').checked, withAccompaniment:$('accompaniment').checked })});
       const q=await r.json();
@@ -390,9 +569,9 @@
     if(mode==='fixed'){ const amt=parseInt($('fixedPrice').value,10); if(!amt||amt<=0){ emptyQuote('Saisis le montant convenu.'); return; } payload.fixedPriceFcfa=amt; }
     else { if(!estimate){ emptyQuote('Renseigne les adresses puis clique « Calculer le prix ».'); return; } payload.distanceMeters=estimate.distanceMeters; payload.durationSeconds=estimate.durationSeconds; }
     try{
-      const r=await fetch(API+'/pricing/quote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const r=await api('/pricing/quote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       if(!r.ok)throw 0; renderQuote(await r.json());
-    }catch(e){ emptyQuote('Tarif indisponible — vérifie la connexion.'); }
+    }catch(e){ if(!(e instanceof AuthRequired)) emptyQuote('Tarif indisponible — vérifie la connexion.'); }
   }
 
   $('mobilityNeed').addEventListener('change',(e)=>{ const wc=$('wheelchair'),w=$('wheelchairWrap');
@@ -407,7 +586,6 @@
   function when2(b){ return b.isImmediate ? 'Dès que possible' : (b.scheduledAt ? new Date(b.scheduledAt).toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : ''); }
 
   let drivers=[];
-  async function loadDrivers(){ try{ const r=await fetch(API+'/drivers?assignable=true'); if(!r.ok)throw 0; drivers=await r.json(); }catch(e){ drivers=[]; } }
   function assignOptions(needPmr){
     const o=[];
     for(const d of drivers){ for(const v of (d.vehicles||[])){ if(needPmr && !v.wheelchairAccessible) continue;
@@ -437,8 +615,7 @@
   }
   function setPayMsg(card,t,isErr){ const m=card&&card.querySelector('.paymsg'); if(m){ m.textContent=t; m.className='paymsg'+(isErr?' err':''); } }
 
-  async function loadQueue(){
-    try{ const r=await fetch(API+'/bookings/upcoming'); if(!r.ok)throw 0; const list=await r.json();
+  function renderQueue(list){
       const q=$('queue'); if(!list.length){ q.innerHTML='<div class="empty">Aucune course à venir.</div>'; return; }
       q.innerHTML=list.map(b=>{
         const now=b.isImmediate?'<span class="tag tag-now">Immédiat</span>':'';
@@ -462,32 +639,34 @@
           ${payBlock(b)}
         </div>`;
       }).join('');
-    }catch(e){ $('queue').innerHTML='<div class="empty err">Impossible de charger les courses.</div>'; }
   }
 
   // Actions sur une course : affectation, lien de paiement, copie, vérification (délégation d'événements)
   $('queue').addEventListener('click', async (e)=>{
     const btn=e.target.closest('[data-action]'); if(!btn)return;
     const card=btn.closest('.qcard'); if(!card)return;
-    const id=card.dataset.id, act=btn.dataset.action;
+    busy++;   // pendant une action, le rafraîchissement automatique ne redessine pas la liste
+    try{ await runAction(btn, card, card.dataset.id, btn.dataset.action); } finally { busy--; }
+  });
 
+  async function runAction(btn, card, id, act){
     if(act==='toggle'){ card.querySelector('.assign-box').classList.toggle('hidden'); return; }
 
     if(act==='confirm'){
       const sel=card.querySelector('.assign-select'); if(!sel||!sel.value)return;
       const [driverId,vehicleId]=sel.value.split('|'); btn.disabled=true;
-      try{ const r=await fetch(`${API}/bookings/${encodeURIComponent(id)}/assign`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({driverId,vehicleId})});
+      try{ const r=await api(`/bookings/${encodeURIComponent(id)}/assign`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({driverId,vehicleId})});
         if(!r.ok){ const d=await r.json(); throw new Error(apiError(d)); }
-        loadQueue();
-      }catch(err){ alert('Échec de l\'affectation : '+err.message); btn.disabled=false; }
+        await refreshAll(true);
+      }catch(err){ if(!(err instanceof AuthRequired)) alert('Échec de l\'affectation : '+err.message); btn.disabled=false; }
       return;
     }
 
     if(act==='paylink'){
       btn.disabled=true; setPayMsg(card,'Génération du lien…');
-      try{ const r=await fetch(`${API}/payments/bookings/${encodeURIComponent(id)}/link`,{method:'POST'});
+      try{ const r=await api(`/payments/bookings/${encodeURIComponent(id)}/link`,{method:'POST'});
         const d=await r.json(); if(!r.ok) throw new Error(apiError(d));
-        await loadQueue();
+        await refreshAll(true);
       }catch(err){ setPayMsg(card,'Échec : '+err.message,true); btn.disabled=false; }
       return;
     }
@@ -503,16 +682,16 @@
 
     if(act==='check'){
       btn.disabled=true; setPayMsg(card,'Vérification auprès de PayDunya…');
-      try{ const r=await fetch(`${API}/payments/${encodeURIComponent(btn.dataset.payment)}/check`,{method:'POST'});
+      try{ const r=await api(`/payments/${encodeURIComponent(btn.dataset.payment)}/check`,{method:'POST'});
         const d=await r.json(); if(!r.ok) throw new Error(apiError(d));
-        if(d.status==='PAID'){ await loadQueue(); }
+        if(d.status==='PAID'){ await refreshAll(true); }
         else if(d.status==='FAILED'){
-          await loadQueue();
+          await refreshAll(true);
           setPayMsg(document.querySelector(`.qcard[data-id="${CSS.escape(id)}"]`),'Le dernier paiement a échoué ou a été annulé : génère un nouveau lien.',true);
         } else { setPayMsg(card,'Pas encore payé.'); btn.disabled=false; }
       }catch(err){ setPayMsg(card,'Échec : '+err.message,true); btn.disabled=false; }
     }
-  });
+  }
 
   function setMsg(t,k){ const m=$('formmsg'); m.textContent=t; m.className='formmsg '+(k||''); }
   async function submit(){
@@ -547,10 +726,10 @@
 
     const btn=$('submit'); btn.disabled=true; setMsg('Création…','');
     try{
-      const r=await fetch(API+'/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const r=await api('/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const data=await r.json();
       if(!r.ok){ const d=Array.isArray(data.message)?data.message.join(', '):(data.message||data.error||'Erreur'); throw new Error(d); }
-      setMsg('Réservation créée — '+data.reference,'ok'); resetForm(); loadQueue();
+      setMsg('Réservation créée — '+data.reference,'ok'); resetForm(); refreshAll(true);
     }catch(e){ setMsg('Échec : '+e.message,'err'); } finally { btn.disabled=false; }
   }
   function resetForm(){
@@ -573,21 +752,38 @@
     if(!name||!phone||!reg) return setFleetMsg('Nom, téléphone et immatriculation requis.','err');
     const btn=$('fleetSave'); btn.disabled=true; setFleetMsg('Enregistrement…','');
     try{
-      let r=await fetch(API+'/drivers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fullName:name,phone,firstAidCertified:$('fAid').checked})});
+      let r=await api('/drivers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fullName:name,phone,firstAidCertified:$('fAid').checked})});
       const d=await r.json(); if(!r.ok)throw new Error(Array.isArray(d.message)?d.message.join(', '):(d.message||d.error||'Erreur chauffeur'));
-      r=await fetch(API+'/vehicles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({registration:reg,type:$('fType').value,wheelchairAccessible:$('fWheel').checked,driverId:d.id})});
+      r=await api('/vehicles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({registration:reg,type:$('fType').value,wheelchairAccessible:$('fWheel').checked,driverId:d.id})});
       const v=await r.json(); if(!r.ok)throw new Error(Array.isArray(v.message)?v.message.join(', '):(v.message||v.error||'Erreur véhicule'));
       setFleetMsg('Chauffeur ajouté ✓','ok');
       ['fName','fPhone','fReg'].forEach(x=>$(x).value=''); $('fWheel').checked=false; $('fAid').checked=false;
-      await loadDrivers(); loadQueue();
+      await refreshAll(true);
     }catch(err){ setFleetMsg('Échec : '+err.message,'err'); } finally { btn.disabled=false; }
   }
   $('fleetSave').addEventListener('click',addFleet);
 
   $('submit').addEventListener('click',submit);
-  $('refresh').addEventListener('click',()=>{ checkApi(); loadDrivers(); loadQueue(); });
+  $('refresh').addEventListener('click',()=>refreshAll(true));
 
-  (async function init(){ const ok=await checkApi(); await loadDrivers(); if(ok) loadQueue(); })();
+  // Démarrage : qui suis-je ? 401 -> écran de connexion ; sinon on charge la console.
+  (async function boot(){
+    try{
+      const r = await fetch(API+'/auth/me', { credentials:'same-origin' });
+      if (r.status === 401) {
+        setStatus('', 'Non connecté');
+        $('queue').innerHTML = '<div class="empty">Connecte-toi pour voir les courses.</div>';
+        showLogin(''); return;
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const { user } = await r.json();
+      if (user.role !== 'ADMIN' && user.role !== 'OPERATOR') { setStatus('', 'Non connecté'); showLogin('Ce compte n\'a pas accès à la console.'); return; }
+      await startSession(user);
+    }catch(e){
+      setStatus('down','API injoignable');
+      $('queue').innerHTML = '<div class="empty err">Impossible de joindre l\'API.<br>Vérifie que le serveur tourne (npm run start:dev) puis actualise la page.</div>';
+    }
+  })();
 </script>
 </body>
 </html>

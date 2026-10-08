@@ -117,19 +117,42 @@ enum DriverStatus {
 model User {
   id           String    @id @default(cuid())
   phone        String    @unique // identifiant principal au Sénégal
-  email        String?   @unique
-  passwordHash String?
+  email        String?   @unique // identifiant de connexion du personnel (en minuscules)
+  passwordHash String? // argon2id (chaîne complète) ; null = connexion par mot de passe impossible
   fullName     String
   role         UserRole
   isActive     Boolean   @default(true)
+  // Pas de verrouillage de compte, volontairement : un opérateur ne doit jamais
+  // être bloqué (transport médical). Seule la limitation par IP freine les abus.
+  lastLoginAt        DateTime?
+  mustChangePassword Boolean   @default(false) // mot de passe temporaire à changer à la 1re connexion
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   driver           Driver?
   clientProfile    Client?
   bookingsCreated  Booking[] @relation("BookingCreatedBy")
+  sessions         Session[]
 
   @@index([role])
+}
+
+// Session de connexion. Le jeton (aléatoire, 32 octets) n'est jamais stocké :
+// seul son hash SHA-256 l'est. Porté par un cookie HttpOnly (console web) ;
+// plus tard aussi par l'en-tête Authorization: Bearer (applications mobiles).
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime // glissante (inactivité), plafonnée à createdAt + durée maximale
+  ip         String?
+  userAgent  String?
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // Le passager. Peut exister sans compte User (réservation par un proche

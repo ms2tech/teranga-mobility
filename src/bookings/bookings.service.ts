@@ -26,7 +26,7 @@ export class BookingsService {
    * planifié), fige le tarif + la répartition commission/chauffeur, et applique
    * la cohérence fauteuil roulant -> véhicule adapté.
    */
-  async create(dto: CreateBookingDto): Promise<Booking> {
+  async create(dto: CreateBookingDto, createdById?: string): Promise<Booking> {
     if (!dto.clientId && !dto.newClient) {
       throw new BadRequestException(
         'Préciser un clientId existant ou les informations newClient.',
@@ -128,7 +128,7 @@ export class BookingsService {
         commissionFcfa: quote.commissionFcfa,
         driverPayoutFcfa: quote.driverPayoutFcfa,
         notes: dto.notes,
-        ...(dto.createdById ? { createdBy: { connect: { id: dto.createdById } } } : {}),
+        ...(createdById ? { createdBy: { connect: { id: createdById } } } : {}),
       };
 
       return tx.booking.create({ data });

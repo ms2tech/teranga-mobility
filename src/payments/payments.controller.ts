@@ -12,6 +12,7 @@ import {
 import { Payment } from '@prisma/client';
 import { PaymentsService } from './payments.service';
 import { PAYMENT_PROVIDER, PaymentProvider } from './payment-provider.interface';
+import { Public } from '../auth/auth.decorators';
 
 @Controller('payments')
 export class PaymentsController {
@@ -42,6 +43,7 @@ export class PaymentsController {
    * (data[hash], data[invoice][token]…) ou en JSON : Nest les parse dans
    * les deux cas vers le même objet imbriqué.
    */
+  @Public() // appelée par PayDunya, sans session : le hash est vérifié puis le statut reconfirmé
   @Post('paydunya/ipn')
   @HttpCode(200)
   async paydunyaIpn(@Body() body: unknown): Promise<{ received: true }> {

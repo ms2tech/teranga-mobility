@@ -7,12 +7,15 @@ import { BookingsModule } from './bookings/bookings.module';
 import { DriversModule } from './drivers/drivers.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { PaymentsModule } from './payments/payments.module';
+import { AuthModule } from './auth/auth.module';
 import { businessConfig } from './config/business.config';
+import { authConfig } from './config/auth.config';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, load: [businessConfig] }),
+    ConfigModule.forRoot({ isGlobal: true, load: [businessConfig, authConfig] }),
     PrismaModule,
+    AuthModule,
     PricingModule,
     RoutesModule,
     BookingsModule,

@@ -15,14 +15,19 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { AssignBookingDto } from './dto/assign-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { PricingModule } from '../pricing/pricing.module';
+import { CurrentUser } from '../auth/auth.decorators';
+import { AuthUser } from '../auth/auth.types';
 
 @Controller('bookings')
 export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}
 
   @Post()
-  create(@Body() dto: CreateBookingDto): Promise<Booking> {
-    return this.bookings.create(dto);
+  create(
+    @Body() dto: CreateBookingDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<Booking> {
+    return this.bookings.create(dto, user.id);
   }
 
   @Get('upcoming')
