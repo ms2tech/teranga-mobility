@@ -71,7 +71,7 @@ Plateforme de réservation de transport adapté porte-à-porte au Sénégal (sen
 - **`npm run user:create` demande un vrai terminal** (PowerShell, Windows Terminal ; `winpty` sous Git Bash) : il refuse de lire un mot de passe hors terminal. Les comptes du seed n'ont ni e-mail ni mot de passe : les reprendre avec ce script (par leur téléphone).
 - **Une facture PayDunya ne s'annule pas** (la doc lue n'en décrit aucun moyen ; à demander au support PayDunya avec la question sur le champ « moyen de paiement », et sur l'expiration des liens). Un lien déjà envoyé reste donc payable même après une confirmation manuelle : l'IPN l'enregistre alors comme double paiement à rembourser. Dire au client de ne plus utiliser le lien.
 - **Confirmer un paiement veut dire « argent reçu ».** Pour débloquer une course sans argent (client de confiance, convention avec un hôpital…), ne jamais confirmer à tort un paiement : cela fausserait les comptes et les reversements au chauffeur. Utiliser la dérogation de départ (motif et auteur, la course reste non payée).
-- **« En route » dans la console est un bouton de l'opérateur** (à terme, l'action de l'application chauffeur) : il exige un chauffeur affecté. Affecter est refusé une fois la course partie ; pour changer de chauffeur en cours de route, il n'y a pas encore de flux (à prévoir).
+- **« En route » dans la console est un bouton de l'opérateur** (à terme, l'action de l'application chauffeur) : il exige un chauffeur affecté. Affecter est refusé une fois la course partie ; pour changer de chauffeur en cours de route, il n'y a pas encore de flux (voir « À faire avant la production »).
 - **Build et `nest start --watch`** : lancer `npm run build` pendant que le serveur de dev tourne peut vider `dist/` et faire planter le serveur (« Cannot find module dist\main »). Arrêter le serveur de dev avant de compiler à la main.
 
 ## À faire avant la production
@@ -81,6 +81,7 @@ Plateforme de réservation de transport adapté porte-à-porte au Sénégal (sen
 - ngrok seulement pendant les tests.
 - `start:prod` corrigé (`node dist/src/main`) : à valider sur le vrai serveur.
 - Correction du prix d'une course par un admin, avec motif obligatoire (le tarif est figé à la réservation : aujourd'hui rien ne permet de le corriger).
+- Changer de chauffeur sur une course déjà partie (panne, incident), avec motif obligatoire : aujourd'hui `assign` est refusé dès `EN_ROUTE`. À prévoir : motif et auteur conservés (historique des chauffeurs de la course), la course gardant son statut et son paiement. À décider avec Moussa avant de construire : qui peut le faire, et le partage de la part chauffeur (`driverPayoutFcfa`) entre l'ancien et le nouveau chauffeur.
 - Modification des tarifs depuis la console par un admin (taux au kilomètre, à la minute, prise en charge, minimum de course, commission, majorations, péage…). Aujourd'hui ils sont dans `.env`, modifiables seulement en éditant le fichier et en redémarrant.
 
 ## Plus tard
