@@ -1,9 +1,11 @@
 import { registerAs } from '@nestjs/config';
 
 /**
- * Règles métier centralisées (modifiables via variables d'environnement,
- * sans toucher au code). Les prix fixes des corridors vivent en base
- * (table Route) ; ici, les taux transverses et le barème au compteur.
+ * VALEURS INITIALES du barème (variables d'environnement). Elles ne sont lues qu'UNE fois :
+ * au premier démarrage, quand la table TariffVersion est vide, TariffsService en tire la
+ * version 1. Ensuite, les tarifs vivent en base (modifiés par un ADMIN depuis la console,
+ * avec motif et historique) et modifier le .env n'a plus aucun effet sur les prix.
+ * Les prix fixes des corridors vivent en base (table Route).
  */
 export const businessConfig = registerAs('business', () => ({
   // Commission prélevée sur la course (modèle chauffeurs partenaires)
@@ -29,8 +31,8 @@ export const businessConfig = registerAs('business', () => ({
   meterPerMinuteFcfa: parseInt(process.env.METER_PER_MINUTE_FCFA ?? '50', 10),
   // Minimum de course (FCFA)
   meterMinimumFareFcfa: parseInt(process.env.METER_MINIMUM_FARE_FCFA ?? '2000', 10),
-  // Vitesse moyenne estimée (km/h) — sert à estimer la durée tant que la
-  // carte n'est pas branchée (l'opérateur ne saisit que la distance).
+  // Vitesse moyenne estimée (km/h) — sert à estimer la durée quand la carte
+  // ne la fournit pas.
   estimatedAvgSpeedKmh: parseFloat(process.env.ESTIMATED_AVG_SPEED_KMH ?? '30'),
 
   // Péage de l'autoroute Dakar–Diamniadio–AIBD (FCFA, à ajuster selon le

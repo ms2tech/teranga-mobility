@@ -191,6 +191,26 @@
   .fleet { padding:16px 20px; border-bottom:1px solid var(--line-soft); background:#fbfcfb; }
   .fleet .grid { gap:10px; }
   .fleet .fleet-actions { margin-top:12px; display:flex; align-items:center; gap:12px; }
+  /* Tarifs des trajets libres (ADMIN) */
+  .dialog.wide { width:min(760px,100%); }
+  .tgroup { margin-top:16px; }
+  .tgroup .sectitle { margin:0 0 8px; }
+  .tgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:560px){ .tgrid{ grid-template-columns:1fr; } }
+  .dialog .tgrid .field + .field { margin-top:0; }
+  .tinput { display:flex; align-items:center; gap:8px; }
+  .tinput input { padding:9px 11px; flex:1; min-width:0; }
+  .tinput .unit { font-size:12px; color:var(--muted); white-space:nowrap; flex:none; min-width:52px; }
+  .ttable { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }
+  .ttable th { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:700; padding:6px; text-align:right; }
+  .ttable td { padding:7px 6px; border-top:1px dashed var(--line); text-align:right; font-variant-numeric:tabular-nums; vertical-align:top; }
+  .ttable th:first-child, .ttable td:first-child { text-align:left; }
+  .ttable small { display:block; color:var(--faint); font-size:11px; }
+  .ttable .tup { color:#8a5a00; font-weight:700; }
+  .ttable .tdown { color:#166534; font-weight:700; }
+  .thist { margin-top:22px; }
+  .tver { padding:9px 0; border-top:1px dashed var(--line); font-size:12.5px; line-height:1.5; }
+  .tver .chg { color:var(--muted); }
   @media (prefers-reduced-motion:reduce){ *{ animation:none!important; transition:none!important; } }
 </style>
 </head>
@@ -211,6 +231,7 @@
     <div class="topbar-right">
       <div class="userbox hidden" id="userbox">
         <div class="who-am-i"><b id="userName">—</b><span id="userRole"></span></div>
+        <button class="topbtn hidden" id="tariffBtn" type="button">Tarifs</button>
         <button class="topbtn" id="pwBtn" type="button">Mot de passe</button>
         <button class="topbtn" id="logoutBtn" type="button">Se déconnecter</button>
       </div>
@@ -361,6 +382,28 @@
     </form>
   </div>
 
+  <!-- Tarifs des trajets libres (ADMIN) : rempli par openTariffs(). Placé AVANT la connexion
+       dans la page : si la session expire, la connexion passe au-dessus. -->
+  <div class="overlay hidden" id="tariffOverlay" role="dialog" aria-modal="true" aria-labelledby="tariffTitle">
+    <form class="dialog wide" id="tariffForm" autocomplete="off" novalidate>
+      <h2 id="tariffTitle">Tarifs des trajets libres</h2>
+      <p class="sub" id="tariffSub"></p>
+      <div class="notice">Un changement ne s'applique qu'aux <b>nouvelles réservations</b> : le prix d'une réservation existante reste figé. Les prix fixes des corridors AIBD ne sont pas concernés.</div>
+      <div id="tariffFields"></div>
+      <button class="btn" id="tariffPreviewBtn" type="button">Voir l'aperçu avant / après</button>
+      <div id="tariffPreview"></div>
+      <div class="hidden" id="tariffSave">
+        <div class="field" style="margin-top:14px;"><label for="tariffReason">Motif du changement (obligatoire)</label>
+          <textarea id="tariffReason" rows="2" maxlength="500" placeholder="Ex. hausse du carburant, révision annuelle des tarifs…"></textarea>
+          <span class="help">10 caractères minimum. Conservé avec la version, votre nom et la date.</span></div>
+        <button class="btn" id="tariffSaveBtn" type="submit">Enregistrer</button>
+      </div>
+      <span class="formmsg" id="tariffMsg" role="alert"></span>
+      <div class="thist"><div class="sectitle">Historique des versions</div><div id="tariffHistory"></div></div>
+      <button class="linkbtn" id="tariffClose" type="button">Fermer</button>
+    </form>
+  </div>
+
   <!-- Connexion : affichée par-dessus la page, sans rien perdre de ce qui est saisi derrière -->
   <div class="overlay hidden" id="loginOverlay" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
     <form class="dialog" id="loginForm">
@@ -432,6 +475,7 @@
       $('userName').textContent = currentUser.fullName;
       $('userRole').textContent = ROLE_LABEL[currentUser.role] || currentUser.role;
     }
+    $('tariffBtn').classList.toggle('hidden', !isAdmin());
     renderRefundPanel();
   }
   function showLogin(msg){
@@ -451,7 +495,7 @@
     await refreshAll(true); startTimers();
   }
   function wipeData(){
-    drivers = []; lastSig = ''; lastList = []; lastToRefund = []; lastToCollect = []; renderRefundPanel(); closeAction();
+    drivers = []; lastSig = ''; lastList = []; lastToRefund = []; lastToCollect = []; renderRefundPanel(); closeAction(); closeTariffs();
     $('queue').innerHTML = '<div class="empty">Connecte-toi pour voir les courses.</div>';
     $('updated').textContent = '';
     resetForm();
@@ -596,9 +640,13 @@
   });
 
   let qt=null, estimate=null;
+  // Total du devis affiché : envoyé à la création (expectedTotalFcfa) pour que le serveur refuse
+  // la course si le prix recalculé diffère (les tarifs ont changé depuis ce devis).
+  let shownTotal=null;
   function scheduleQuote(){ clearTimeout(qt); qt=setTimeout(refreshQuote,220); }
-  function emptyQuote(t){ $('quoteBody').innerHTML=`<p class="quote-empty">${esc(t)}</p>`; $('quoteMode').classList.add('hidden'); }
+  function emptyQuote(t){ shownTotal=null; $('quoteBody').innerHTML=`<p class="quote-empty">${esc(t)}</p>`; $('quoteMode').classList.add('hidden'); }
   function renderQuote(q){
+    shownTotal=q.totalPriceFcfa;
     const m=$('quoteMode'); m.classList.remove('hidden'); m.textContent=q.pricingMode==='FLAT'?'Prix fixe':'Au compteur';
     const body=$('quoteBody');
     body.innerHTML = q.breakdown.map(l=>`<div class="qline"><span class="lbl">${esc(l.label)}</span><span class="amt">${esc(money(l.amountFcfa))}</span></div>`).join('')
@@ -1068,6 +1116,127 @@
     busy++; try { await runAction(btn, row, row.dataset.id, btn.dataset.action); } finally { busy--; }
   });
 
+  // ── Tarifs des trajets libres (ADMIN) ───────────────────────────────────
+  // Libellés, unités et bornes viennent de l'API (source unique : src/tariffs/tariff-bounds.ts).
+  // Une version n'est jamais modifiée : enregistrer en crée une nouvelle (aperçu, puis motif
+  // obligatoire). Elle ne s'applique qu'aux nouvelles réservations : les prix déjà calculés restent figés.
+  const TARIFF_GROUPS = [
+    { title:'Barème au compteur', keys:['meterBaseFareFcfa','meterPerKmFcfa','meterPerMinuteFcfa','meterMinimumFareFcfa','estimatedAvgSpeedKmh'] },
+    { title:'Péage, majorations et accompagnement', keys:['autorouteTollFcfa','pmrVehicleSurchargeRate','vipSurchargeRate','defaultAccompanimentFeeFcfa'] },
+    { title:'Commission', keys:['commissionRate'] },
+  ];
+  let tariffCur = null, tariffBounds = null, tariffPreviewed = false;
+  const tIsPct = (k) => tariffBounds[k].unit === 'fraction';      // taux : l'API les stocke en fraction, la console les affiche en %
+  const tUnit = (k) => tIsPct(k) ? '%' : tariffBounds[k].unit;
+  const tToInput = (k, v) => String(tIsPct(k) ? +(v * 100).toFixed(2) : v);
+  const tFromInput = (k, s) => { const t = String(s).replace(',', '.').trim(), n = Number(t); return t === '' || !Number.isFinite(n) ? NaN : (tIsPct(k) ? Math.round(n * 100) / 10000 : n); };
+  const tShow = (k, v) => tIsPct(k) ? `${+(v * 100).toFixed(2)} %` : `${fmt.format(v)} ${tariffBounds[k].unit}`;
+  const setTariffMsg = (t, isErr) => { const m = $('tariffMsg'); m.textContent = t; m.className = 'formmsg' + (isErr ? ' err' : ''); };
+
+  function renderTariffFields(){
+    $('tariffFields').innerHTML = TARIFF_GROUPS.map(g =>
+      `<div class="tgroup"><div class="sectitle">${esc(g.title)}</div><div class="tgrid">` +
+      g.keys.map(k => {
+        const b = tariffBounds[k], lo = tIsPct(k) ? +(b.min * 100).toFixed(2) : b.min, hi = tIsPct(k) ? +(b.max * 100).toFixed(2) : b.max;
+        return `<div class="field"><label for="t_${esc(k)}">${esc(b.label)}</label>` +
+          `<div class="tinput"><input id="t_${esc(k)}" data-tkey="${esc(k)}" type="text" inputmode="decimal" value="${esc(tToInput(k, tariffCur[k]))}" /><span class="unit">${esc(tUnit(k))}</span></div>` +
+          `<span class="help">Entre ${esc(fmt.format(lo))} et ${esc(fmt.format(hi))} ${esc(tUnit(k))}</span></div>`;
+      }).join('') + '</div></div>').join('');
+  }
+  function resetTariffPreview(){ tariffPreviewed = false; $('tariffPreview').innerHTML = ''; $('tariffSave').classList.add('hidden'); }
+
+  // Lit et contrôle les champs (le serveur refait les mêmes contrôles). Lance une Error lisible sinon.
+  function collectTariff(){
+    const v = {};
+    for (const k of Object.keys(tariffBounds)) {
+      const b = tariffBounds[k], n = tFromInput(k, $('t_' + k).value);
+      if (Number.isNaN(n)) throw new Error(`${b.label} : saisis un nombre.`);
+      if (b.integer && !Number.isInteger(n)) throw new Error(`${b.label} : un nombre entier est attendu.`);
+      if (n < b.min || n > b.max) throw new Error(`${b.label} : entre ${tShow(k, b.min)} et ${tShow(k, b.max)}.`);
+      v[k] = n;
+    }
+    if (v.meterMinimumFareFcfa < v.meterBaseFareFcfa) throw new Error('Le minimum de course ne peut pas être inférieur à la prise en charge.');
+    return v;
+  }
+  const sameTariff = (v) => Object.keys(tariffBounds).every(k => v[k] === tariffCur[k]);
+
+  function tariffPreviewHtml(d){
+    const rows = d.trips.map(t => {
+      const diff = t.proposed.totalFcfa - t.current.totalFcfa, cls = diff > 0 ? 'tup' : diff < 0 ? 'tdown' : '';
+      return `<tr><td>${esc(t.label)}</td>` +
+        `<td>${esc(fmt.format(t.current.totalFcfa))}<small>chauffeur ${esc(fmt.format(t.current.driverPayoutFcfa))}</small></td>` +
+        `<td>${esc(fmt.format(t.proposed.totalFcfa))}<small>chauffeur ${esc(fmt.format(t.proposed.driverPayoutFcfa))}</small></td>` +
+        `<td class="${cls}">${diff > 0 ? '+' : ''}${esc(fmt.format(diff))}</td></tr>`;
+    }).join('');
+    return `<table class="ttable"><thead><tr><th>Trajet type</th><th>Actuel (v${esc(d.basedOnVersion)})</th><th>Proposé</th><th>Écart</th></tr></thead><tbody>${rows}</tbody></table>` +
+      `<p class="help" style="margin-top:6px;">Montants en FCFA. Durées fixes pour la comparaison : la durée réelle vient de la carte.</p>`;
+  }
+  function tariffVersionHtml(h, prev){
+    const changes = prev ? Object.keys(tariffBounds).filter(k => h[k] !== prev[k]).map(k => `${esc(tariffBounds[k].label)} : ${esc(tShow(k, prev[k]))} → <b>${esc(tShow(k, h[k]))}</b>`) : [];
+    return `<div class="tver"><b>Version ${esc(h.version)}</b> · ${esc(fmtDT(h.createdAt))} · ${esc(h.createdBy ? h.createdBy.fullName : 'valeurs initiales')}` +
+      `<div>« ${esc(h.reason)} »</div>${changes.length ? `<div class="chg">${changes.join(' · ')}</div>` : ''}</div>`;
+  }
+
+  async function loadTariffs(){
+    const [cr, hr] = await Promise.all([api('/tariffs/current'), api('/tariffs/history')]);
+    if (!cr.ok || !hr.ok) throw new Error('Tarifs indisponibles (HTTP ' + (cr.ok ? hr.status : cr.status) + ').');
+    const cur = await cr.json(), hist = await hr.json();
+    tariffCur = cur; tariffBounds = cur.bounds;
+    renderTariffFields(); resetTariffPreview(); $('tariffReason').value = '';
+    $('tariffSub').textContent = `Version ${cur.version} en vigueur · ${fmtDT(cur.createdAt)} · ${cur.createdBy ? cur.createdBy.fullName : 'valeurs initiales (.env)'}`;
+    $('tariffHistory').innerHTML = hist.map((h, i) => tariffVersionHtml(h, hist[i + 1])).join('');
+  }
+  async function openTariffs(){
+    if (!isAdmin()) return;
+    setTariffMsg(''); $('tariffFields').innerHTML = '<div class="empty">Chargement…</div>'; $('tariffHistory').innerHTML = '';
+    resetTariffPreview(); $('tariffOverlay').classList.remove('hidden');
+    try { await loadTariffs(); }
+    catch (err) { if (!(err instanceof AuthRequired)) setTariffMsg(err instanceof TypeError ? 'Serveur injoignable.' : err.message, true); }
+  }
+  function closeTariffs(){ $('tariffOverlay').classList.add('hidden'); tariffCur = null; tariffBounds = null; tariffPreviewed = false; $('tariffReason').value = ''; }
+
+  async function previewTariff(){
+    let v; try { v = collectTariff(); } catch (e) { setTariffMsg(e.message, true); return; }
+    if (sameTariff(v)) { setTariffMsg('Aucun changement : ces valeurs sont déjà celles de la version en vigueur.', true); return; }
+    const btn = $('tariffPreviewBtn'); btn.disabled = true; setTariffMsg('Calcul de l\'aperçu…');
+    try {
+      const d = await postJson('/tariffs/preview', v);
+      $('tariffPreview').innerHTML = tariffPreviewHtml(d);
+      tariffPreviewed = true; $('tariffSave').classList.remove('hidden');
+      $('tariffSaveBtn').textContent = `Enregistrer la version ${tariffCur.version + 1}`;
+      setTariffMsg('');
+    } catch (err) { if (!(err instanceof AuthRequired)) setTariffMsg(err instanceof TypeError ? 'Serveur injoignable.' : err.message, true); }
+    finally { btn.disabled = false; }
+  }
+  async function saveTariff(){
+    if (!tariffPreviewed) { setTariffMsg('Voir l\'aperçu avant d\'enregistrer.', true); return; }
+    let v; try { v = collectTariff(); } catch (e) { setTariffMsg(e.message, true); return; }
+    const reason = $('tariffReason').value.trim();
+    if (reason.length < 10) { setTariffMsg('Le motif doit faire au moins 10 caractères.', true); return; }
+    const btn = $('tariffSaveBtn'); btn.disabled = true; setTariffMsg('Enregistrement…');
+    try {
+      const r = await api('/tariffs', { method:'POST', headers: JSON_HEADERS, body: JSON.stringify({ ...v, basedOnVersion: tariffCur.version, reason }) });
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok) {
+        if (d.code === 'TARIFF_VERSION_STALE') {
+          await loadTariffs();
+          throw new Error(`Les tarifs ont été modifiés entre-temps : le panneau est rechargé (version ${tariffCur.version}). Vérifie les valeurs, puis recommence.`);
+        }
+        throw new Error(apiError(d));
+      }
+      await loadTariffs();
+      setTariffMsg(`Version ${d.version} enregistrée ✓ — elle s'applique aux nouvelles réservations.`);
+    } catch (err) { if (!(err instanceof AuthRequired)) setTariffMsg(err instanceof TypeError ? 'Serveur injoignable.' : err.message, true); }
+    finally { btn.disabled = false; }
+  }
+  $('tariffBtn').addEventListener('click', openTariffs);
+  $('tariffClose').addEventListener('click', closeTariffs);
+  $('tariffPreviewBtn').addEventListener('click', previewTariff);
+  // Toute modification d'un champ invalide l'aperçu : on n'enregistre que ce qui a été prévisualisé.
+  $('tariffFields').addEventListener('input', ()=>{ resetTariffPreview(); setTariffMsg(''); });
+  $('tariffForm').addEventListener('submit', (e)=>{ e.preventDefault(); saveTariff(); });
+  document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape' && !$('tariffOverlay').classList.contains('hidden')) closeTariffs(); });
+
   function setMsg(t,k){ const m=$('formmsg'); m.textContent=t; m.className='formmsg '+(k||''); }
   async function submit(){
     const name=$('clientName').value.trim(), phone=$('clientPhone').value.trim();
@@ -1098,14 +1267,19 @@
     const bb=$('bookedBy').value.trim(); if(bb)payload.bookedByName=bb;
     const bp=$('bookedByPhone').value.trim(); if(bp)payload.bookedByPhone=bp;
     const nt=$('notes').value.trim(); if(nt)payload.notes=nt;
+    if(shownTotal!=null) payload.expectedTotalFcfa=shownTotal;
 
     const btn=$('submit'); btn.disabled=true; setMsg('Création…','');
     try{
       const r=await api('/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const data=await r.json();
-      if(!r.ok){ const d=Array.isArray(data.message)?data.message.join(', '):(data.message||data.error||'Erreur'); throw new Error(d); }
+      if(!r.ok){ const d=Array.isArray(data.message)?data.message.join(', '):(data.message||data.error||'Erreur'); const err=new Error(d); err.code=data.code; throw err; }
       setMsg('Réservation créée — '+data.reference,'ok'); resetForm(); refreshAll(true);
-    }catch(e){ setMsg('Échec : '+e.message,'err'); } finally { btn.disabled=false; }
+    }catch(e){
+      setMsg('Échec : '+e.message,'err');
+      // Les tarifs ont changé depuis le devis : on réaffiche le nouveau prix, à confirmer avec le client.
+      if(e.code==='TARIFF_CHANGED') refreshQuote();
+    } finally { btn.disabled=false; }
   }
   function resetForm(){
     ['clientName','clientPhone','bookedBy','bookedByPhone','notes','pickup','dropoff','scheduledAt','fixedPrice'].forEach(id=>$(id).value='');

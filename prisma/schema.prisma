@@ -148,6 +148,7 @@ model User {
   bookingsCancelled Booking[] @relation("BookingCancelledBy")
   waiversGranted    DepartureWaiver[] @relation("WaiverGrantedBy")
   waiversRevoked    DepartureWaiver[] @relation("WaiverRevokedBy")
+  tariffVersionsCreated TariffVersion[] @relation("TariffVersionCreatedBy")
 
   @@index([role])
 }
@@ -246,6 +247,37 @@ model Route {
   bookings Booking[]
 }
 
+// Barème des trajets libres, par version. Une version n'est JAMAIS modifiée ni supprimée :
+// modifier les tarifs crée une nouvelle version (motif et auteur obligatoires). La version
+// courante est la plus haute. Un changement ne s'applique qu'aux nouvelles réservations :
+// les prix déjà calculés restent figés dans la réservation. La version 1 (createdById
+// vide) reprend les valeurs du .env au premier démarrage ; ensuite le .env n'a plus d'effet.
+model TariffVersion {
+  id      String @id @default(cuid())
+  version Int    @unique
+
+  // Barème au compteur
+  meterBaseFareFcfa    Int // prise en charge
+  meterPerKmFcfa       Int // prix par kilomètre
+  meterPerMinuteFcfa   Int // prix par minute
+  meterMinimumFareFcfa Int // minimum de course
+  estimatedAvgSpeedKmh Float // vitesse moyenne : estime la durée quand la carte ne la fournit pas
+  autorouteTollFcfa    Int // péage autoroute (non commissionné)
+
+  // Majorations, accompagnement, commission (taux en fraction : 0.18 = 18 %)
+  pmrVehicleSurchargeRate     Float
+  vipSurchargeRate            Float
+  defaultAccompanimentFeeFcfa Int
+  commissionRate              Float
+
+  reason      String
+  createdById String?
+  createdBy   User?    @relation("TariffVersionCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  bookings Booking[]
+}
+
 // ── Réservations ────────────────────────────────────────────────────────
 
 model Booking {
@@ -296,7 +328,12 @@ model Booking {
   vehicleId  String?
   vehicle    Vehicle?      @relation(fields: [vehicleId], references: [id])
 
-  // Tarification figée à la réservation (FCFA)
+  // Tarification figée à la réservation (FCFA) : le prix ne change jamais après l'accord
+  // du client (si le trajet change vraiment, on annule et on recrée la réservation).
+  // tariffVersion : version du barème avec laquelle le prix a été calculé (vide avant les
+  // tarifs en base).
+  tariffVersionId    String?
+  tariffVersion      TariffVersion? @relation(fields: [tariffVersionId], references: [id])
   pricingMode        PricingMode @default(FLAT)
   baseFareFcfa       Int // prise en charge (METERED) ou prix du corridor (FLAT)
   distanceFareFcfa   Int @default(0) // part distance (METERED)

@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { generateBookingReference } from '../common/reference';
+import { coded } from '../common/coded';
 import { PAYMENT_PEOPLE } from '../payments/payment.include';
 import { BEFORE_DEPARTURE, WAIVER_PEOPLE } from './departure-waivers.service';
 
@@ -45,13 +45,6 @@ const STATUS_LABEL: Record<BookingStatus, string> = {
 const DEPARTURE_STATUSES: BookingStatus[] = ['EN_ROUTE', 'IN_PROGRESS'];
 
 const CANCEL_REASON_MIN = 5;
-
-const ERROR_NAME: Record<number, string> = { 400: 'Bad Request', 403: 'Forbidden', 409: 'Conflict' };
-
-/** Erreur 4xx avec un code que la console sait afficher (PAYMENT_REQUIRED, DRIVER_REQUIRED…). */
-function coded(statusCode: 400 | 403 | 409, code: string, message: string): HttpException {
-  return new HttpException({ statusCode, code, message, error: ERROR_NAME[statusCode] }, statusCode);
-}
 
 @Injectable()
 export class BookingsService {
@@ -110,6 +103,17 @@ export class BookingsService {
       viaToll: dto.viaToll,
     });
 
+    // Garde-fou : le client a accepté un prix précis. Si les tarifs ont changé depuis le
+    // devis de l'opérateur, on ne crée pas la course à un autre prix sans qu'il le sache.
+    if (dto.expectedTotalFcfa != null && dto.expectedTotalFcfa !== quote.totalPriceFcfa) {
+      throw coded(
+        409,
+        'TARIFF_CHANGED',
+        `Le prix a changé depuis le devis : ${quote.totalPriceFcfa} FCFA au lieu de ${dto.expectedTotalFcfa} FCFA. Recalculez le devis, puis confirmez le nouveau prix avec le client.`,
+        { expectedTotalFcfa: dto.expectedTotalFcfa, currentTotalFcfa: quote.totalPriceFcfa },
+      );
+    }
+
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       let clientId = dto.clientId;
       if (!clientId && dto.newClient) {
@@ -155,6 +159,7 @@ export class BookingsService {
         needsWheelchairVehicle,
         withAccompaniment: dto.withAccompaniment ?? false,
         status: BookingStatus.PENDING,
+        ...(quote.tariffVersionId ? { tariffVersion: { connect: { id: quote.tariffVersionId } } } : {}),
         pricingMode: quote.pricingMode,
         baseFareFcfa: quote.baseFareFcfa,
         distanceFareFcfa: quote.distanceFareFcfa,

@@ -42,6 +42,9 @@ export class CreateBookingDto {
   // Trajet libre : adresses quelconques. Corridor à prix fixe : routeId (facultatif).
   @IsOptional() @IsString() routeId?: string;
   @IsOptional() @IsInt() @Min(1) fixedPriceFcfa?: number;
+  // Prix que l'opérateur a vu et annoncé au client. Si le prix recalculé à la création
+  // diffère (les tarifs ont changé entre-temps), la réservation est refusée (409 TARIFF_CHANGED).
+  @IsOptional() @IsInt() @Min(1) expectedTotalFcfa?: number;
   @IsOptional() @IsEnum(TripDirection) direction?: TripDirection;
   @IsString() pickupAddress!: string;
   @IsOptional() @IsNumber() pickupLat?: number;

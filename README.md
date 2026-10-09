@@ -99,6 +99,9 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   - **À rembourser** : les doubles paiements PayDunya et l'argent reçu pour une course
     **annulée**. Rien n'est remboursé automatiquement : un admin marque le
     remboursement une fois fait à la main.
+- **Tarifs** (admins, bouton dans la barre du haut) : tous les paramètres des trajets libres,
+  aperçu avant / après, motif obligatoire, historique des versions. Voir « Tarifs des
+  trajets libres ».
 - **Flotte** : ajout d'un chauffeur avec son véhicule.
 
 ---
@@ -110,8 +113,8 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   - `MANAGER` (responsable des opérations) : tout l'OPERATOR, plus la confirmation
     manuelle d'un paiement, la dérogation de départ, l'annulation d'une course déjà
     payée et le panneau « À régler » ;
-  - `ADMIN` : tout, plus l'annulation d'une confirmation, le remboursement (et, plus
-    tard, la correction de prix, les tarifs et les comptes).
+  - `ADMIN` : tout, plus l'annulation d'une confirmation, le remboursement et les
+    tarifs des trajets libres (et, plus tard, les comptes).
 
   Les rôles `CLIENT` et `DRIVER` existent mais n'ont accès à aucune route du personnel.
 - **Comment** : un jeton de session aléatoire, porté par un cookie `tm_session`
@@ -270,11 +273,16 @@ de transitions côté serveur ; une transition interdite répond `409 INVALID_TR
   compteur (prise en charge + km + minutes), plus péage et majorations
   (véhicule adapté PMR **+20 %**, accompagnement, VIP), puis répartition
   **commission plateforme / part chauffeur** (modèle partenaire Phase 1).
+  **Règle permanente : le prix d'une course est figé à la réservation et ne change
+  jamais après l'accord du client.** Si le trajet change vraiment, on annule la
+  réservation et on en crée une nouvelle. Un changement de tarif ne touche que les
+  réservations créées ensuite ; chaque réservation garde la version du barème avec
+  laquelle son prix a été calculé (`Booking.tariffVersionId`).
 - **Garde-fou accessibilité** : une course fauteuil roulant ne peut être
   affectée qu'à un véhicule adapté, et un véhicule ne peut être affecté qu'à
   son propre chauffeur.
 
-### Tarifs de référence (modifiables en base)
+### Prix des corridors AIBD (en base, table `Route`)
 
 | Axe            | Standard (FCFA) | Fourchette          |
 |----------------|-----------------|---------------------|
@@ -284,9 +292,50 @@ de transitions côté serveur ; une transition interdite répond `409 INVALID_TR
 | Mbour ↔ AIBD   | 15 000          | 12 000 – 18 000     |
 | Saly ↔ AIBD    | 18 000 *(à valider)* | 15 000 – 20 000 |
 
-Commission (18 %), accompagnement (7 500), majoration PMR (20 %), majoration VIP
-(15 %), barème au compteur et péage autoroute sont pilotés par variables
-d'environnement — modifiables sans toucher au code.
+Ces prix ne sont pas encore modifiables depuis la console (lot suivant) : relancer le seed
+les remet aux valeurs ci-dessus.
+
+### Tarifs des trajets libres (en base, par version)
+
+Les dix paramètres du barème vivent dans la table `TariffVersion` : prise en charge, prix
+au kilomètre, prix à la minute, minimum de course, vitesse moyenne estimée, péage
+autoroute, majoration PMR, majoration VIP, accompagnement, commission.
+
+- **Un ADMIN les modifie depuis la console** (bouton « Tarifs ») : valeurs, **aperçu avant /
+  après** sur des trajets types (1, 5, 10, 25 km, péage, PMR, VIP), puis **motif
+  obligatoire** (10 caractères minimum). Chaque enregistrement crée une **nouvelle version**,
+  avec son auteur et sa date ; une version n'est jamais modifiée ni supprimée, et
+  l'historique (avec les différences d'une version à l'autre) est affiché dans le panneau.
+- **Effet immédiat, mais seulement sur les nouvelles réservations.** Les prix déjà calculés
+  restent figés. Pas de date d'application programmée.
+- **Valeurs de départ** : au premier démarrage, la version 1 est créée depuis les variables
+  du `.env` (`COMMISSION_RATE`, `METER_PER_KM_FCFA`…). **Ensuite le `.env` n'a plus aucun
+  effet sur les prix** : tout passe par la console.
+- **Bornes par champ** (elles attrapent une faute de frappe, elles ne fixent pas les prix ;
+  les taux sont des fractions, 0,18 = 18 %) :
+
+  | Paramètre                   | Minimum | Maximum  |
+  |-----------------------------|---------|----------|
+  | Prise en charge             | 0       | 10 000 FCFA |
+  | Prix au kilomètre           | 50      | 5 000 FCFA/km |
+  | Prix à la minute            | 0       | 1 000 FCFA/min |
+  | Minimum de course           | 500     | 50 000 FCFA |
+  | Vitesse moyenne estimée     | 10      | 120 km/h (1 décimale) |
+  | Péage autoroute             | 0       | 10 000 FCFA |
+  | Majoration véhicule PMR     | 0 %     | 50 % |
+  | Majoration service VIP      | 0 %     | 50 % |
+  | Accompagnement              | 0       | 50 000 FCFA |
+  | Commission                  | 5 %     | 40 % |
+
+  Les montants en FCFA sont des entiers, les taux ont 4 décimales au plus. Le minimum de
+  course ne peut pas être inférieur à la prise en charge.
+- **Deux admins en même temps** : la requête indique la version sur laquelle elle s'appuie ;
+  si elle a changé entre-temps, `409 TARIFF_VERSION_STALE` et la console se recharge.
+- **Garde-fou à la création d'une course** : la console envoie le prix affiché
+  (`expectedTotalFcfa`). Si le prix recalculé diffère (tarifs changés depuis le devis),
+  la réservation est refusée (`409 TARIFF_CHANGED`, avec le prix actuel) : l'opérateur
+  recalcule le devis et confirme le nouveau prix avec le client. Le champ est facultatif
+  pour les autres clients de l'API.
 
 ---
 
@@ -297,7 +346,7 @@ d'environnement — modifiables sans toucher au code.
 | `GET`   | `/api/routes`                             | Axes desservis                               |
 | `POST`  | `/api/pricing/quote`                      | Devis instantané (détail ligne à ligne)      |
 | `POST`  | `/api/pricing/estimate`                   | Devis à partir de deux adresses (Google Maps)|
-| `POST`  | `/api/bookings`                           | Créer une réservation                        |
+| `POST`  | `/api/bookings`                           | Créer une réservation (`expectedTotalFcfa` facultatif : 409 `TARIFF_CHANGED` si le prix a changé) |
 | `GET`   | `/api/bookings/upcoming`                  | File des courses à venir (avec tous leurs paiements) |
 | `GET`   | `/api/bookings/:id`                       | Détail d'une réservation                     |
 | `GET`   | `/api/bookings/to-collect`                | Courses à encaisser (**MANAGER, ADMIN**)     |
@@ -317,6 +366,10 @@ d'environnement — modifiables sans toucher au code.
 | `GET`   | `/api/payments/to-refund`                 | Doubles paiements et paiements de courses annulées à rembourser (**MANAGER, ADMIN**) |
 | `POST`  | `/api/payments/:id/void`                  | Annuler une confirmation manuelle (**ADMIN**, motif) |
 | `POST`  | `/api/payments/:id/refund`                | Marquer un remboursement (**ADMIN**, motif et référence) |
+| `GET`   | `/api/tariffs/current`                    | Version courante du barème, avec les bornes (**ADMIN**) |
+| `GET`   | `/api/tariffs/history`                    | Toutes les versions du barème (**ADMIN**)    |
+| `POST`  | `/api/tariffs/preview`                    | Aperçu avant / après sur des trajets types, sans rien créer (**ADMIN**) |
+| `POST`  | `/api/tariffs`                            | Nouvelle version du barème : les dix valeurs, `basedOnVersion`, motif (**ADMIN**) |
 | `POST`  | `/api/payments/paydunya/ipn`              | Notification de paiement (appelée par PayDunya, **publique**) |
 | `POST`  | `/api/auth/login`                         | Connexion (**publique**, 10 essais/min par IP) |
 | `POST`  | `/api/auth/logout`                        | Déconnexion (**publique**, sans erreur possible) |
@@ -347,11 +400,12 @@ src/
   main.ts                  point d'entrée (préfixe /api, validation, fichiers statiques)
   app.module.ts            module racine
   prisma/                  PrismaService (connexion) + module global
-  config/business.config   règles tarifaires (env)
+  config/business.config   valeurs INITIALES du barème (env, lues une fois pour la version 1)
   config/auth.config       durées de session, nom du cookie (env)
   auth/                    connexion : garde global, sessions, mots de passe (argon2id)
-  common/reference.ts      génération de références de réservation
-  pricing/                 moteur de tarification (service + controller + DTO + test)
+  common/                  références de réservation, erreurs à code (coded.ts)
+  pricing/                 moteur de tarification (compute-quote.ts : fonction pure ; service, controller, DTO, test)
+  tariffs/                 barème en base : versions, bornes, aperçu, historique (ADMIN)
   maps/                    Google Maps : géocodage, itinéraire, péage
   routes/                  axes desservis
   bookings/                réservations (service + controller + DTO), dérogations de départ
@@ -376,9 +430,11 @@ prisma/
       départ bloqué tant que la course n'est pas payée
 - [x] Dérogation de départ, boutons de statut dans la console (En route, Terminée,
       Client absent, Annulée), « À encaisser » et « À rembourser »
+- [x] Tarifs des trajets libres en base, modifiables par un admin (motif, historique,
+      aperçu avant / après, prix déjà calculés figés, garde-fou `expectedTotalFcfa`)
+- [ ] Prix des corridors AIBD modifiables par un admin (avec historique ; le seed ne les
+      écrasera plus)
 - [ ] Frais d'annulation (aujourd'hui : remboursement intégral)
-- [ ] Correction du prix d'une course par un admin (avec motif)
-- [ ] Modification des tarifs depuis la console par un admin (aujourd'hui dans `.env`)
 - [ ] Site et domaine, passage de PayDunya en mode live (URL IPN du vrai serveur)
 
 **Fondation**
