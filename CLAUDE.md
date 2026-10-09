@@ -83,3 +83,4 @@ Plateforme de réservation de transport adapté porte-à-porte au Sénégal (sen
   - **Urgences vitales** : le site renvoie vers le SAMU au **1515** (message visible dès l'accueil et dans le parcours de réservation). Téranga Mobility ne fait que du transport adapté non urgent et ne doit jamais être présenté comme un service d'urgence.
 - Applications mobiles chauffeur et client (rôles DRIVER et CLIENT), après le site public.
 - Reversements chauffeurs (leurs commissions : la société leur reverse `driverPayoutFcfa` après encaissement), probablement via Wave Bulk Pay ; SMS de confirmation : voir README.
+- **Bien après le MVP** : pouvoir téléverser une preuve lors d'une confirmation manuelle « Autre » (capture Wave ou Orange Money, photo de reçu, PDF). Les fichiers sont stockés hors de la base, dans un service de stockage, et visibles uniquement par le personnel connecté (aucun lien public).
