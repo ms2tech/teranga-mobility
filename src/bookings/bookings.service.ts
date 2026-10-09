@@ -11,6 +11,7 @@ import { PricingService } from '../pricing/pricing.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { generateBookingReference } from '../common/reference';
 import { coded } from '../common/coded';
+import { CLIENT_SUMMARY, DRIVER_SUMMARY, ROUTE_SUMMARY, VEHICLE_ON_BOOKING } from '../common/safe-selects';
 import { PAYMENT_PEOPLE } from '../payments/payment.include';
 import { STATUS_LABEL } from './booking-status';
 import { BEFORE_DEPARTURE, WAIVER_PEOPLE } from './departure-waivers.service';
@@ -180,8 +181,12 @@ export class BookingsService {
   findOne(id: string): Promise<Booking | null> {
     return this.prisma.booking.findUnique({
       where: { id },
+      // Jamais de relation complète (client, chauffeur…) : voir common/safe-selects.ts
       include: {
-        client: true, route: true, driver: true, vehicle: true,
+        client: { select: CLIENT_SUMMARY },
+        route: { select: ROUTE_SUMMARY },
+        driver: { select: DRIVER_SUMMARY },
+        vehicle: { select: VEHICLE_ON_BOOKING },
         driverChanges: { orderBy: { changedAt: 'desc' }, include: DRIVER_CHANGE_PEOPLE },
       },
     });
@@ -192,11 +197,12 @@ export class BookingsService {
     return this.prisma.booking.findMany({
       where: status ? { status } : { status: { in: ACTIVE_STATUSES } },
       orderBy: [{ isImmediate: 'desc' }, { scheduledAt: 'asc' }],
+      // Jamais de relation complète (client, chauffeur…) : voir common/safe-selects.ts
       include: {
-        client: true,
-        route: true,
-        driver: { include: { user: true } },
-        vehicle: { select: { id: true, registration: true, model: true, type: true } },
+        client: { select: CLIENT_SUMMARY },
+        route: { select: ROUTE_SUMMARY },
+        driver: { select: DRIVER_SUMMARY },
+        vehicle: { select: VEHICLE_ON_BOOKING },
         // Tous les paiements de la course (la console en tire le lien en attente,
         // le paiement reçu, les doubles paiements et l'historique)
         payments: { orderBy: { createdAt: 'desc' }, include: PAYMENT_PEOPLE },

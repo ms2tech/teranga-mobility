@@ -3,6 +3,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { Booking, BookingStatus, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { coded } from '../common/coded';
+import { PERSON_NAME } from '../common/safe-selects';
 import { PrismaService } from '../prisma/prisma.service';
 import { STATUS_LABEL } from './booking-status';
 import { ChangeDriverDto } from './dto/change-driver.dto';
@@ -12,11 +13,11 @@ export const ON_THE_ROAD: BookingStatus[] = ['EN_ROUTE', 'IN_PROGRESS'];
 
 /** Noms et immatriculations seulement (jamais le compte complet du chauffeur). */
 export const DRIVER_CHANGE_PEOPLE = {
-  fromDriver: { select: { user: { select: { fullName: true } } } },
-  toDriver: { select: { user: { select: { fullName: true } } } },
+  fromDriver: { select: { user: PERSON_NAME } },
+  toDriver: { select: { user: PERSON_NAME } },
   fromVehicle: { select: { registration: true, model: true } },
   toVehicle: { select: { registration: true, model: true } },
-  changedBy: { select: { fullName: true } },
+  changedBy: PERSON_NAME,
 } satisfies Prisma.DriverChangeInclude;
 
 /**

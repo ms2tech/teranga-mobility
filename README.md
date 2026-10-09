@@ -47,10 +47,12 @@ La console demande une connexion : voir « Connexion » plus bas.
 En production : `npm run build` puis `npm run start:prod` (le build sort dans
 `dist/src/`).
 
-Tester la tarification, sans base de données :
+Tests conservés, sans base de données ni serveur (quelques secondes) :
 
 ```bash
-npm run test:pricing
+npm test                  # tarification + données sensibles
+npm run test:pricing      # moteur de tarification (12 cas)
+npm run test:sensitive    # aucune réponse ne doit contenir passwordHash (voir « Données sensibles »)
 ```
 
 > Note : `prisma generate` télécharge un moteur natif depuis
@@ -145,6 +147,30 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
 - **Derrière ngrok ou un hébergeur**, renseigner `TRUST_PROXY` (nombre de proxys de
   confiance, ex. `1`) : sans cela, la limitation voit l'adresse du proxy pour tout
   le monde. À laisser vide quand l'API est exposée en direct.
+
+### Données sensibles : jamais dans une réponse de l'API
+
+**Aucune réponse de l'API ne contient `passwordHash`, ni aucun autre champ sensible d'un
+compte** (e-mail, téléphone de connexion, dates de connexion, état du mot de passe), ni le
+numéro de reversement ou le taux de commission d'un chauffeur, ni les notes médicales ou
+l'e-mail d'un passager. Une personne n'apparaît dans une réponse que par son **nom**
+(l'auteur d'une confirmation, d'une dérogation, d'un changement de chauffeur, d'une
+version de tarif…), le chauffeur par `id`, statut, secourisme et nom, le passager par
+`id`, nom et téléphone (pour l'appeler). Seules exceptions, sur le compte de l'appelant
+lui-même : `POST /api/auth/login` et `GET /api/auth/me` (id, nom, e-mail, rôle, mot de
+passe à changer), jamais de hash.
+
+Comment c'est garanti, en trois couches :
+1. **`select` explicites** : toute lecture destinée à une réponse passe par les sélections
+   partagées de `src/common/safe-selects.ts` (`PERSON_NAME`, `DRIVER_SUMMARY`,
+   `CLIENT_SUMMARY`…). Pas de `include: { user: true }`, pas de `driver: true`.
+2. **Filet de sécurité global** (`SensitiveFieldsInterceptor`) : si une requête laissait quand
+   même passer un `passwordHash` ou un `tokenHash`, il est retiré de la réponse et l'erreur
+   est journalisée (« Champ sensible retiré d'une réponse… ») pour être corrigée à la source.
+3. **Contrôle automatique** : `npm run test:sensitive` vérifie le filet, les sélections
+   partagées et le code source (il échoue si quelqu'un écrit `user: true`, `driver: true`,
+   `…By: true`, `client: true`, ou nomme `passwordHash` hors de l'authentification).
+   Pour une nouvelle route, relire ce principe : ne sélectionner que les champs nécessaires.
 
 ### Gérer les comptes : `npm run user:create`
 
@@ -319,6 +345,13 @@ l'affectation suffit ; une course terminée, annulée ou « client absent » ne 
 
 ### Corridors à prix fixe (en base, table `Route`)
 
+> **Décision d'origine : le prix d'une réservation vient toujours des adresses (trajet
+> libre) ou d'un prix fixe saisi par l'opérateur.** Le site public n'utilisera que le trajet
+> libre. La gestion des corridors reste en place, mais **ils ne servent pas à réserver** :
+> ni la console ni le futur site ne proposent de réserver sur un corridor (l'API accepte
+> encore `routeId`, sans interface qui l'utilise). Les utiliser pour réserver (console et
+> site public) viendra bien après le lancement.
+
 Un corridor est un trajet à prix fixe : ville ↔ AIBD, ou ville ↔ ville (par exemple
 Thiès ↔ Touba). Les cinq axes AIBD du seed sont les valeurs de **départ** :
 
@@ -346,8 +379,8 @@ Thiès ↔ Touba). Les cinq axes AIBD du seed sont les valeurs de **départ** :
   réservation à sa création. Un changement de prix ne touche que les réservations créées
   ensuite. Le garde-fou `expectedTotalFcfa` couvre aussi les réservations à prix de
   corridor : si le prix du corridor change entre le devis et la création,
-  `409 TARIFF_CHANGED`. (La console n'a pas de mode « corridor » : ces réservations viennent
-  de l'API, par exemple du futur site public.)
+  `409 TARIFF_CHANGED`. (Aucune interface ne réserve sur un corridor : cela ne concerne que
+  l'API.)
 - **Deux admins en même temps** : chaque corridor a une `version` ; la requête indique celle
   sur laquelle elle s'appuie, sinon `409 ROUTE_VERSION_STALE`.
 - **Le code, le nom et la ville ne changent pas** après la création (le code est
@@ -480,7 +513,8 @@ src/
   config/business.config   valeurs INITIALES du barème (env, lues une fois pour la version 1)
   config/auth.config       durées de session, nom du cookie (env)
   auth/                    connexion : garde global, sessions, mots de passe (argon2id)
-  common/                  références de réservation, erreurs à code (coded.ts)
+  common/                  références de réservation, erreurs à code (coded.ts), sélections
+                           sûres (safe-selects.ts), filet « données sensibles » (intercepteur) et son test
   pricing/                 moteur de tarification (compute-quote.ts : fonction pure ; service, controller, DTO, test)
   tariffs/                 barème en base : versions, bornes, aperçu, historique (ADMIN)
   maps/                    Google Maps : géocodage, itinéraire, péage
@@ -513,6 +547,8 @@ prisma/
 - [x] Corridors à prix fixe gérés par un admin (création ville ↔ ville comprise, prix,
       désactivation, motif, historique ; le seed ne les écrase plus)
 - [x] Changement de chauffeur en route (panne, incident), avec motif et historique
+- [x] Aucune donnée sensible dans les réponses de l'API (passwordHash, comptes, reversement des
+      chauffeurs) : sélections sûres, filet global, contrôle `npm run test:sensitive`
 - [ ] Frais d'annulation (aujourd'hui : remboursement intégral)
 - [ ] Site et domaine, passage de PayDunya en mode live (URL IPN du vrai serveur)
 
@@ -525,7 +561,8 @@ prisma/
 
 **Ensuite**
 - [x] Console opérateur — saisie des réservations téléphoniques
-- [ ] Site de réservation client (PWA), paiement avant validation
+- [ ] Site de réservation client (PWA), paiement avant validation (trajet libre seulement)
+- [ ] **Bien après le lancement** : réserver sur un corridor (console et site public)
 - [ ] Géolocalisation temps réel (WebSocket gateway NestJS) — suivi chauffeur
 
 **Phase 2 (marché validé)**

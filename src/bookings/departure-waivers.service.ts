@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { BookingStatus, DepartureWaiver, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { PERSON_NAME } from '../common/safe-selects';
 import { PAYMENT_PEOPLE } from '../payments/payment.include';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -15,8 +16,8 @@ export const BEFORE_DEPARTURE: BookingStatus[] = ['PENDING', 'CONFIRMED', 'ASSIG
 
 /** Noms de ceux qui ont accordé ou retiré une dérogation. */
 export const WAIVER_PEOPLE = {
-  grantedBy: { select: { fullName: true } },
-  revokedBy: { select: { fullName: true } },
+  grantedBy: PERSON_NAME,
+  revokedBy: PERSON_NAME,
 } satisfies Prisma.DepartureWaiverInclude;
 
 /**

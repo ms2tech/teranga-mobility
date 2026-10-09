@@ -1,5 +1,6 @@
 import { Injectable, ConflictException } from '@nestjs/common';
 import { Vehicle, Prisma } from '@prisma/client';
+import { DRIVER_SUMMARY, VEHICLE_FIELDS } from '../common/safe-selects';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 
@@ -28,10 +29,11 @@ export class VehiclesService {
     return this.prisma.vehicle.create({ data });
   }
 
-  findAll(): Promise<Vehicle[]> {
+  /** Véhicules actifs, avec le résumé de leur chauffeur (jamais son compte : voir common/safe-selects.ts). */
+  findAll() {
     return this.prisma.vehicle.findMany({
       where: { isActive: true },
-      include: { driver: { include: { user: true } } },
+      select: { ...VEHICLE_FIELDS, driver: { select: DRIVER_SUMMARY } },
       orderBy: { createdAt: 'desc' },
     });
   }

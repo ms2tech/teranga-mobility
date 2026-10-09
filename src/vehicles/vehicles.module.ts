@@ -8,7 +8,7 @@ export class VehiclesController {
   constructor(private readonly vehicles: VehiclesService) {}
 
   @Get()
-  findAll(): Promise<Vehicle[]> {
+  findAll() {
     return this.vehicles.findAll();
   }
 

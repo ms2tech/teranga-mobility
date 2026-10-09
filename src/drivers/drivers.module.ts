@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Module, Param, Patch, Post, Query } from '@nestjs/common';
-import { Driver } from '@prisma/client';
+import { DriverSummary, DriverWithVehicles } from '../common/safe-selects';
 import { DriversService } from './drivers.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverStatusDto } from './dto/update-driver-status.dto';
@@ -9,14 +9,14 @@ export class DriversController {
   constructor(private readonly drivers: DriversService) {}
 
   @Get()
-  findAll(@Query('assignable') assignable?: string): Promise<Driver[]> {
+  findAll(@Query('assignable') assignable?: string): Promise<DriverWithVehicles[]> {
     return assignable === 'true'
       ? this.drivers.findAssignable()
       : this.drivers.findAll();
   }
 
   @Post()
-  create(@Body() dto: CreateDriverDto): Promise<Driver> {
+  create(@Body() dto: CreateDriverDto): Promise<DriverWithVehicles> {
     return this.drivers.create(dto);
   }
 
@@ -24,7 +24,7 @@ export class DriversController {
   updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateDriverStatusDto,
-  ): Promise<Driver> {
+  ): Promise<DriverSummary> {
     return this.drivers.updateStatus(id, dto.status);
   }
 }

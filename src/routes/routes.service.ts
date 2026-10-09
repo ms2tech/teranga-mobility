@@ -2,13 +2,14 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, Route, RouteChangeKind } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { coded } from '../common/coded';
+import { PERSON_NAME } from '../common/safe-selects';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { RouteStateDto } from './dto/route-state.dto';
 import { UpdateRouteDto } from './dto/update-route.dto';
 
 /** Auteur d'un changement : le nom seulement. */
-const CHANGE_PEOPLE = { changedBy: { select: { fullName: true } } } satisfies Prisma.RouteChangeInclude;
+const CHANGE_PEOPLE = { changedBy: PERSON_NAME } satisfies Prisma.RouteChangeInclude;
 export type RouteChangeWithAuthor = Prisma.RouteChangeGetPayload<{ include: typeof CHANGE_PEOPLE }>;
 
 type RouteValues = Pick<Route, 'basePriceFcfa' | 'priceMinFcfa' | 'priceMaxFcfa' | 'estimatedDurationMin'>;

@@ -4,6 +4,7 @@ import { ConfigType } from '@nestjs/config';
 import { Prisma, ServiceType, TariffVersion } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { coded } from '../common/coded';
+import { PERSON_NAME } from '../common/safe-selects';
 import { businessConfig } from '../config/business.config';
 import { ComputeParams, TariffValues, computeQuote } from '../pricing/compute-quote';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,7 +12,7 @@ import { CreateTariffDto } from './dto/create-tariff.dto';
 import { TARIFF_BOUNDS, TARIFF_KEYS } from './tariff-bounds';
 
 /** Auteur d'une version : le nom seulement. */
-const TARIFF_PEOPLE = { createdBy: { select: { fullName: true } } } satisfies Prisma.TariffVersionInclude;
+const TARIFF_PEOPLE = { createdBy: PERSON_NAME } satisfies Prisma.TariffVersionInclude;
 export type TariffVersionWithAuthor = Prisma.TariffVersionGetPayload<{ include: typeof TARIFF_PEOPLE }>;
 
 /**
