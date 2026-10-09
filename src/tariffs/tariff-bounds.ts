@@ -1,18 +1,8 @@
 // src/tariffs/tariff-bounds.ts
-import { applyDecorators } from '@nestjs/common';
-import { IsInt, IsNumber, Max, Min } from 'class-validator';
+import { BoundedNumber, NumberBound } from '../common/bounded-number';
 import { TariffValues } from '../pricing/compute-quote';
 
-export interface TariffBound {
-  /** Nom affiché dans les messages et dans la console. */
-  label: string;
-  unit: 'FCFA' | 'FCFA/km' | 'FCFA/min' | 'km/h' | 'fraction';
-  /** true : nombre entier ; false : nombre à virgule (avec `maxDecimals` décimales). */
-  integer: boolean;
-  maxDecimals: number;
-  min: number;
-  max: number;
-}
+export type TariffBound = NumberBound;
 
 /**
  * Bornes raisonnables de chaque paramètre : elles ne servent pas à fixer les prix mais à
@@ -34,20 +24,5 @@ export const TARIFF_BOUNDS: Record<keyof TariffValues, TariffBound> = {
 
 export const TARIFF_KEYS = Object.keys(TARIFF_BOUNDS) as Array<keyof TariffValues>;
 
-const fmt = (v: number, unit: TariffBound['unit']): string =>
-  unit === 'fraction' ? `${+(v * 100).toFixed(2)} %` : `${v.toLocaleString('fr-FR')} ${unit}`;
-
 /** Décorateur de DTO : type + bornes d'un paramètre du barème, avec des messages en français. */
-export function TariffField(key: keyof TariffValues): PropertyDecorator {
-  const b = TARIFF_BOUNDS[key];
-  const range = `${b.label} : entre ${fmt(b.min, b.unit)} et ${fmt(b.max, b.unit)}.`;
-  return applyDecorators(
-    b.integer
-      ? IsInt({ message: `${b.label} : un nombre entier est attendu.` })
-      : IsNumber({ maxDecimalPlaces: b.maxDecimals, allowNaN: false, allowInfinity: false }, {
-          message: `${b.label} : un nombre est attendu (${b.maxDecimals} décimale(s) au plus).`,
-        }),
-    Min(b.min, { message: range }),
-    Max(b.max, { message: range }),
-  );
-}
+export const TariffField = (key: keyof TariffValues): PropertyDecorator => BoundedNumber(TARIFF_BOUNDS[key]);

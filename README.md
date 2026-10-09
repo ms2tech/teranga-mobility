@@ -100,8 +100,10 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
     **annulée**. Rien n'est remboursé automatiquement : un admin marque le
     remboursement une fois fait à la main.
 - **Tarifs** (admins, bouton dans la barre du haut) : tous les paramètres des trajets libres,
-  aperçu avant / après, motif obligatoire, historique des versions. Voir « Tarifs des
-  trajets libres ».
+  aperçu avant / après, motif obligatoire, historique des versions (voir « Tarifs des
+  trajets libres »), et section « Corridors à prix fixe » : créer, modifier les prix,
+  désactiver ou réactiver un corridor, consulter son historique (voir « Corridors à prix
+  fixe »).
 - **Flotte** : ajout d'un chauffeur avec son véhicule.
 
 ---
@@ -114,7 +116,7 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
     manuelle d'un paiement, la dérogation de départ, l'annulation d'une course déjà
     payée et le panneau « À régler » ;
   - `ADMIN` : tout, plus l'annulation d'une confirmation, le remboursement et les
-    tarifs des trajets libres (et, plus tard, les comptes).
+    tarifs des trajets libres et les corridors (et, plus tard, les comptes).
 
   Les rôles `CLIENT` et `DRIVER` existent mais n'ont accès à aucune route du personnel.
 - **Comment** : un jeton de session aléatoire, porté par un cookie `tm_session`
@@ -282,7 +284,10 @@ de transitions côté serveur ; une transition interdite répond `409 INVALID_TR
   affectée qu'à un véhicule adapté, et un véhicule ne peut être affecté qu'à
   son propre chauffeur.
 
-### Prix des corridors AIBD (en base, table `Route`)
+### Corridors à prix fixe (en base, table `Route`)
+
+Un corridor est un trajet à prix fixe : ville ↔ AIBD, ou ville ↔ ville (par exemple
+Thiès ↔ Touba). Les cinq axes AIBD du seed sont les valeurs de **départ** :
 
 | Axe            | Standard (FCFA) | Fourchette          |
 |----------------|-----------------|---------------------|
@@ -292,8 +297,40 @@ de transitions côté serveur ; une transition interdite répond `409 INVALID_TR
 | Mbour ↔ AIBD   | 15 000          | 12 000 – 18 000     |
 | Saly ↔ AIBD    | 18 000 *(à valider)* | 15 000 – 20 000 |
 
-Ces prix ne sont pas encore modifiables depuis la console (lot suivant) : relancer le seed
-les remet aux valeurs ci-dessus.
+- **Un ADMIN les gère depuis la console** (bouton « Tarifs », section « Corridors à prix
+  fixe ») : créer un corridor, modifier le prix de base, le minimum, le maximum et la durée
+  estimée, désactiver ou réactiver. **Motif obligatoire** (10 caractères minimum) à chaque
+  changement.
+- **Jamais de suppression** : des réservations y font référence. On désactive (`isActive`) :
+  un corridor désactivé n'est plus proposé (`GET /api/routes`, devis et réservations
+  refusés) mais les réservations existantes le gardent, avec leur prix. On peut le
+  réactiver. Son code reste réservé.
+- **Historique** (table `RouteChange`, jamais modifiée) : pour chaque changement, le type
+  (création, modification, désactivation, réactivation), la version, l'auteur, la date, le
+  motif, et les **anciennes et nouvelles valeurs**. Visible dans la console (« Historique »
+  de chaque corridor).
+- **Les prix déjà calculés restent figés** : le prix d'une réservation est copié dans la
+  réservation à sa création. Un changement de prix ne touche que les réservations créées
+  ensuite. Le garde-fou `expectedTotalFcfa` couvre aussi les réservations à prix de
+  corridor : si le prix du corridor change entre le devis et la création,
+  `409 TARIFF_CHANGED`. (La console n'a pas de mode « corridor » : ces réservations viennent
+  de l'API, par exemple du futur site public.)
+- **Deux admins en même temps** : chaque corridor a une `version` ; la requête indique celle
+  sur laquelle elle s'appuie, sinon `409 ROUTE_VERSION_STALE`.
+- **Le code, le nom et la ville ne changent pas** après la création (le code est
+  l'identifiant stable). Le prix de base doit rester entre le minimum et le maximum.
+- **Bornes** (elles attrapent une faute de frappe, elles ne fixent pas les prix) :
+
+  | Champ                      | Minimum | Maximum |
+  |----------------------------|---------|---------|
+  | Prix de base               | 1 000   | 300 000 FCFA |
+  | Prix minimum indicatif     | 1 000   | 300 000 FCFA |
+  | Prix maximum indicatif     | 1 000   | 300 000 FCFA |
+  | Durée estimée              | 5       | 720 min |
+
+  Code : lettres majuscules, chiffres et tirets (3 à 20 caractères, ex. `THS-TBA`).
+- **Le seed ne modifie plus les corridors** : `npm run prisma:seed` crée les axes absents et
+  laisse les autres intacts. Les prix modifiés par un admin ne sont jamais écrasés.
 
 ### Tarifs des trajets libres (en base, par version)
 
@@ -343,7 +380,13 @@ autoroute, majoration PMR, majoration VIP, accompagnement, commission.
 
 | Méthode | Endpoint                                  | Rôle                                         |
 |---------|-------------------------------------------|----------------------------------------------|
-| `GET`   | `/api/routes`                             | Axes desservis                               |
+| `GET`   | `/api/routes`                             | Corridors actifs                             |
+| `GET`   | `/api/routes/admin`                       | Tous les corridors (désactivés compris) et les bornes (**ADMIN**) |
+| `GET`   | `/api/routes/:id/history`                 | Historique d'un corridor (**ADMIN**)         |
+| `POST`  | `/api/routes`                             | Nouveau corridor : code, nom, ville, prix, durée, motif (**ADMIN**) |
+| `PATCH` | `/api/routes/:id`                         | Nouveaux prix et durée, `basedOnVersion`, motif (**ADMIN**) |
+| `POST`  | `/api/routes/:id/deactivate`              | Désactiver un corridor, `basedOnVersion`, motif (**ADMIN**) |
+| `POST`  | `/api/routes/:id/reactivate`              | Réactiver un corridor, `basedOnVersion`, motif (**ADMIN**) |
 | `POST`  | `/api/pricing/quote`                      | Devis instantané (détail ligne à ligne)      |
 | `POST`  | `/api/pricing/estimate`                   | Devis à partir de deux adresses (Google Maps)|
 | `POST`  | `/api/bookings`                           | Créer une réservation (`expectedTotalFcfa` facultatif : 409 `TARIFF_CHANGED` si le prix a changé) |
@@ -407,7 +450,7 @@ src/
   pricing/                 moteur de tarification (compute-quote.ts : fonction pure ; service, controller, DTO, test)
   tariffs/                 barème en base : versions, bornes, aperçu, historique (ADMIN)
   maps/                    Google Maps : géocodage, itinéraire, péage
-  routes/                  axes desservis
+  routes/                  corridors à prix fixe : liste, création, prix, désactivation, historique (ADMIN)
   bookings/                réservations (service + controller + DTO), dérogations de départ
   drivers/                 chauffeurs (création, liste, statut)
   vehicles/                véhicules
@@ -432,8 +475,8 @@ prisma/
       Client absent, Annulée), « À encaisser » et « À rembourser »
 - [x] Tarifs des trajets libres en base, modifiables par un admin (motif, historique,
       aperçu avant / après, prix déjà calculés figés, garde-fou `expectedTotalFcfa`)
-- [ ] Prix des corridors AIBD modifiables par un admin (avec historique ; le seed ne les
-      écrasera plus)
+- [x] Corridors à prix fixe gérés par un admin (création ville ↔ ville comprise, prix,
+      désactivation, motif, historique ; le seed ne les écrase plus)
 - [ ] Frais d'annulation (aujourd'hui : remboursement intégral)
 - [ ] Site et domaine, passage de PayDunya en mode live (URL IPN du vrai serveur)
 

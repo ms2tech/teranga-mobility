@@ -149,6 +149,7 @@ model User {
   waiversGranted    DepartureWaiver[] @relation("WaiverGrantedBy")
   waiversRevoked    DepartureWaiver[] @relation("WaiverRevokedBy")
   tariffVersionsCreated TariffVersion[] @relation("TariffVersionCreatedBy")
+  routeChanges      RouteChange[] @relation("RouteChangedBy")
 
   @@index([role])
 }
@@ -229,22 +230,64 @@ model Vehicle {
 
 // ── Réseau & tarification ───────────────────────────────────────────────
 
-// Un axe desservi (ville <-> AIBD). Le prix de base est symétrique ;
-// le sens est porté par la réservation.
+// Un corridor à prix fixe : ville <-> AIBD, ou ville <-> ville. Le prix de base est
+// symétrique ; le sens est porté par la réservation. Un corridor n'est JAMAIS supprimé :
+// des réservations y font référence, on le désactive (isActive). Chaque changement (création,
+// prix, désactivation, réactivation) passe par un ADMIN avec un motif et ajoute une ligne
+// RouteChange (jamais modifiée). Les prix des réservations existantes restent figés.
 model Route {
   id                  String   @id @default(cuid())
-  code                String   @unique // ex. "DKR-AIBD"
-  city                String // ex. "Dakar"
-  label               String // ex. "Dakar <-> AIBD"
+  code                String   @unique // ex. "DKR-AIBD", "THS-TBA" ; ne change jamais
+  city                String // ville de l'axe, pour le tri et l'affichage (ex. "Dakar")
+  label               String // ex. "Dakar <-> AIBD", "Thiès <-> Touba"
   basePriceFcfa       Int // prix facturé (course standard)
   priceMinFcfa        Int // borne basse indicative
   priceMaxFcfa        Int // borne haute indicative
   estimatedDurationMin Int? // durée estimée
   isActive            Boolean  @default(true)
+  // Incrémentée à chaque changement : deux admins ne s'écrasent pas (409 si périmée).
+  version             Int      @default(1)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   bookings Booking[]
+  changes  RouteChange[]
+}
+
+enum RouteChangeKind {
+  CREATED
+  UPDATED // prix et / ou durée
+  DEACTIVATED
+  REACTIVATED
+}
+
+// Historique d'un corridor : qui, quand, pourquoi, anciennes et nouvelles valeurs.
+// Jamais modifiée ni supprimée. Les valeurs « old* » sont vides à la création.
+model RouteChange {
+  id      String          @id @default(cuid())
+  routeId String
+  route   Route           @relation(fields: [routeId], references: [id])
+  kind    RouteChangeKind
+  version Int // version du corridor obtenue après ce changement
+
+  oldBasePriceFcfa        Int?
+  oldPriceMinFcfa         Int?
+  oldPriceMaxFcfa         Int?
+  oldEstimatedDurationMin Int?
+  oldIsActive             Boolean?
+
+  basePriceFcfa        Int
+  priceMinFcfa         Int
+  priceMaxFcfa         Int
+  estimatedDurationMin Int?
+  isActive             Boolean
+
+  reason      String
+  changedById String
+  changedBy   User     @relation("RouteChangedBy", fields: [changedById], references: [id])
+  changedAt   DateTime @default(now())
+
+  @@index([routeId])
 }
 
 // Barème des trajets libres, par version. Une version n'est JAMAIS modifiée ni supprimée :

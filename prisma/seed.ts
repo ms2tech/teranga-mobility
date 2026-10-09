@@ -3,7 +3,9 @@ import { PrismaClient, UserRole, VehicleType } from '@prisma/client';
 const prisma = new PrismaClient();
 
 /**
- * Axes desservis et tarifs de référence (FCFA).
+ * Axes desservis et tarifs de référence (FCFA) : valeurs de DÉPART seulement.
+ * Le seed ne fait que créer les corridors absents : il ne modifie jamais un corridor existant,
+ * car un ADMIN peut avoir changé ses prix depuis la console (avec historique).
  * NB : Saly n'avait pas de prix indiqué — estimation à valider.
  */
 const ROUTES = [
@@ -15,10 +17,14 @@ const ROUTES = [
 ];
 
 async function main(): Promise<void> {
+  let createdRoutes = 0;
   for (const r of ROUTES) {
-    await prisma.route.upsert({ where: { code: r.code }, update: r, create: r });
+    // update: {} — création seulement : un corridor existant (prix peut-être modifiés) n'est pas touché.
+    const exists = await prisma.route.findUnique({ where: { code: r.code }, select: { id: true } });
+    await prisma.route.upsert({ where: { code: r.code }, update: {}, create: r });
+    if (!exists) createdRoutes++;
   }
-  console.log(`✅ ${ROUTES.length} axes créés/à jour`);
+  console.log(`✅ ${createdRoutes} axe(s) créé(s), ${ROUTES.length - createdRoutes} déjà présent(s) (non modifiés)`);
 
   const admin = await prisma.user.upsert({
     where: { phone: '+221770000001' },

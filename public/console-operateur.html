@@ -211,6 +211,10 @@
   .thist { margin-top:22px; }
   .tver { padding:9px 0; border-top:1px dashed var(--line); font-size:12.5px; line-height:1.5; }
   .tver .chg { color:var(--muted); }
+  .crow { padding:10px 0; border-top:1px dashed var(--line); font-size:13px; display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
+  .crow:first-of-type { border-top:none; }
+  .crow details.hist { width:100%; }
+  .crow .tver:first-child { border-top:none; }
   @media (prefers-reduced-motion:reduce){ *{ animation:none!important; transition:none!important; } }
 </style>
 </head>
@@ -367,28 +371,14 @@
     </section>
   </main>
 
-  <!-- Dialogue d'action (paiement reçu autrement, annulation, remboursement) : construit par openAction().
-       Placé AVANT la connexion dans la page : si la session expire, la connexion passe au-dessus. -->
-  <div class="overlay hidden" id="actionOverlay" role="dialog" aria-modal="true" aria-labelledby="actionTitle">
-    <form class="dialog" id="actionForm">
-      <h2 id="actionTitle"></h2>
-      <p class="sub" id="actionSub"></p>
-      <div class="notice hidden" id="actionNotice"></div>
-      <div id="actionFields"></div>
-      <div id="actionExtra"></div>
-      <button class="btn" id="actionSubmit" type="submit"></button>
-      <button class="linkbtn" id="actionCancel" type="button">Annuler</button>
-      <span class="formmsg" id="actionMsg" role="alert"></span>
-    </form>
-  </div>
-
-  <!-- Tarifs des trajets libres (ADMIN) : rempli par openTariffs(). Placé AVANT la connexion
-       dans la page : si la session expire, la connexion passe au-dessus. -->
+  <!-- Tarifs et corridors (ADMIN) : rempli par openTariffs(). Placé AVANT le dialogue d'action
+       (qui s'ouvre par-dessus, pour modifier un corridor) et AVANT la connexion (si la session
+       expire, la connexion passe au-dessus de tout). -->
   <div class="overlay hidden" id="tariffOverlay" role="dialog" aria-modal="true" aria-labelledby="tariffTitle">
     <form class="dialog wide" id="tariffForm" autocomplete="off" novalidate>
       <h2 id="tariffTitle">Tarifs des trajets libres</h2>
       <p class="sub" id="tariffSub"></p>
-      <div class="notice">Un changement ne s'applique qu'aux <b>nouvelles réservations</b> : le prix d'une réservation existante reste figé. Les prix fixes des corridors AIBD ne sont pas concernés.</div>
+      <div class="notice">Un changement ne s'applique qu'aux <b>nouvelles réservations</b> : le prix d'une réservation existante reste figé. Les prix fixes des corridors se gèrent plus bas, dans « Corridors à prix fixe ».</div>
       <div id="tariffFields"></div>
       <button class="btn" id="tariffPreviewBtn" type="button">Voir l'aperçu avant / après</button>
       <div id="tariffPreview"></div>
@@ -400,7 +390,30 @@
       </div>
       <span class="formmsg" id="tariffMsg" role="alert"></span>
       <div class="thist"><div class="sectitle">Historique des versions</div><div id="tariffHistory"></div></div>
+      <div class="thist" id="corridorSection">
+        <div class="sectitle">Corridors à prix fixe</div>
+        <p class="help" style="margin:0 0 8px;">Ville ↔ AIBD ou ville ↔ ville. Un corridor n'est jamais supprimé : on le désactive (les réservations existantes y font référence et gardent leur prix). Chaque changement demande un motif et reste dans l'historique.</p>
+        <div id="corridorList"><div class="empty">Chargement…</div></div>
+        <button class="assignbtn" id="corridorNew" type="button" style="margin-top:10px;">+ Nouveau corridor…</button>
+        <span class="formmsg" id="corridorMsg" role="alert"></span>
+      </div>
       <button class="linkbtn" id="tariffClose" type="button">Fermer</button>
+    </form>
+  </div>
+
+  <!-- Dialogue d'action (paiement reçu autrement, annulation, remboursement, corridors, changement
+       de chauffeur) : construit par openAction(). Placé APRÈS le panneau des tarifs pour s'ouvrir
+       par-dessus, et AVANT la connexion : si la session expire, la connexion passe au-dessus. -->
+  <div class="overlay hidden" id="actionOverlay" role="dialog" aria-modal="true" aria-labelledby="actionTitle">
+    <form class="dialog" id="actionForm">
+      <h2 id="actionTitle"></h2>
+      <p class="sub" id="actionSub"></p>
+      <div class="notice hidden" id="actionNotice"></div>
+      <div id="actionFields"></div>
+      <div id="actionExtra"></div>
+      <button class="btn" id="actionSubmit" type="submit"></button>
+      <button class="linkbtn" id="actionCancel" type="button">Annuler</button>
+      <span class="formmsg" id="actionMsg" role="alert"></span>
     </form>
   </div>
 
@@ -909,8 +922,11 @@
     for (const f of cfg.fields) {
       const wrap = document.createElement('div'); wrap.className = 'field';
       const lab = document.createElement('label'); lab.textContent = f.label; lab.htmlFor = 'act_' + f.key; wrap.appendChild(lab);
-      const el = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
-      if (f.type === 'textarea') el.rows = f.rows || 3; else el.type = f.type || 'text';
+      const el = document.createElement(f.type === 'textarea' ? 'textarea' : f.type === 'select' ? 'select' : 'input');
+      if (f.type === 'textarea') el.rows = f.rows || 3;
+      else if (f.type === 'select') {
+        for (const o of f.options || []) { const op = document.createElement('option'); op.value = o.value; op.textContent = o.label; el.appendChild(op); }
+      } else el.type = f.type || 'text';
       el.id = 'act_' + f.key; el.name = f.key; el.autocomplete = 'off';
       if (f.required) el.required = true;
       if (f.minLength) el.minLength = f.minLength;
@@ -931,10 +947,11 @@
     const sub = $('actionSubmit'); sub.textContent = cfg.submitLabel; sub.className = 'btn' + (cfg.danger ? ' danger' : '');
     setActionMsg(''); actionHandler = cfg.onSubmit;
     $('actionOverlay').classList.remove('hidden');
-    const first = fields.querySelector('input,textarea'); if (first) first.focus();
+    const first = fields.querySelector('input,textarea,select'); if (first) first.focus();
   }
   $('actionCancel').addEventListener('click', closeAction);
-  document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape' && !$('actionOverlay').classList.contains('hidden')) closeAction(); });
+  // Échap ferme le dialogue d'action, et lui seul : il peut être ouvert par-dessus le panneau des tarifs.
+  document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape' && !$('actionOverlay').classList.contains('hidden')) { closeAction(); e.stopImmediatePropagation(); } });
   $('actionForm').addEventListener('submit', async (e)=>{
     e.preventDefault(); if (!actionHandler) return;
     const values = {}; for (const k in actionInputs) values[k] = actionInputs[k].value.trim();
@@ -947,12 +964,14 @@
   const pad2 = (n) => String(n).padStart(2, '0');
   const localInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   const JSON_HEADERS = { 'Content-Type': 'application/json' };
-  async function postJson(path, body){
-    const r = await api(path, { method:'POST', headers: JSON_HEADERS, body: JSON.stringify(body || {}) });
+  // Appel JSON ; en cas d'erreur, l'Error porte le code de l'API (ex. ROUTE_VERSION_STALE) dans `.code`.
+  async function callJson(method, path, body){
+    const r = await api(path, { method, headers: JSON_HEADERS, body: JSON.stringify(body || {}) });
     const d = await r.json().catch(()=>({}));
-    if (!r.ok) throw new Error(apiError(d));
+    if (!r.ok) { const err = new Error(apiError(d)); err.code = d.code; throw err; }
     return d;
   }
+  const postJson = (path, body) => callJson('POST', path, body);
   // Une course peut venir de la file active ou du panneau « À encaisser » (une course terminée
   // n'est plus dans la file) : les dialogues cherchent dans les deux.
   const findBooking = (id) => lastList.find(x => x.id === id) || lastToCollect.find(x => x.id === id);
@@ -1190,10 +1209,16 @@
     if (!isAdmin()) return;
     setTariffMsg(''); $('tariffFields').innerHTML = '<div class="empty">Chargement…</div>'; $('tariffHistory').innerHTML = '';
     resetTariffPreview(); $('tariffOverlay').classList.remove('hidden');
+    setCorrMsg(''); $('corridorList').innerHTML = '<div class="empty">Chargement…</div>';
     try { await loadTariffs(); }
     catch (err) { if (!(err instanceof AuthRequired)) setTariffMsg(err instanceof TypeError ? 'Serveur injoignable.' : err.message, true); }
+    try { await loadCorridors(); }
+    catch (err) { if (!(err instanceof AuthRequired)) setCorrMsg(err instanceof TypeError ? 'Serveur injoignable.' : err.message, true); }
   }
-  function closeTariffs(){ $('tariffOverlay').classList.add('hidden'); tariffCur = null; tariffBounds = null; tariffPreviewed = false; $('tariffReason').value = ''; }
+  function closeTariffs(){
+    $('tariffOverlay').classList.add('hidden'); tariffCur = null; tariffBounds = null; tariffPreviewed = false; $('tariffReason').value = '';
+    corridors = []; corrBounds = null; $('corridorList').innerHTML = '';
+  }
 
   async function previewTariff(){
     let v; try { v = collectTariff(); } catch (e) { setTariffMsg(e.message, true); return; }
@@ -1236,6 +1261,132 @@
   $('tariffFields').addEventListener('input', ()=>{ resetTariffPreview(); setTariffMsg(''); });
   $('tariffForm').addEventListener('submit', (e)=>{ e.preventDefault(); saveTariff(); });
   document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape' && !$('tariffOverlay').classList.contains('hidden')) closeTariffs(); });
+
+  // ── Corridors à prix fixe (ADMIN), dans le panneau Tarifs ───────────────
+  // Jamais de suppression : on désactive. Chaque changement demande un motif et laisse une ligne
+  // d'historique (auteur, date, anciennes et nouvelles valeurs). Les réservations existantes
+  // gardent leur prix. Libellés et bornes viennent de l'API (src/routes/route-bounds.ts).
+  let corridors = [], corrBounds = null;
+  const setCorrMsg = (t, isErr) => { const m = $('corridorMsg'); m.textContent = t; m.className = 'formmsg' + (isErr ? ' err' : ''); };
+  const CORR_KIND = { CREATED:'Création', UPDATED:'Modification', DEACTIVATED:'Désactivation', REACTIVATED:'Réactivation' };
+  const CORR_FIELDS = [ // [libellé, valeur, ancienne valeur, unité]
+    ['Prix de base', 'basePriceFcfa', 'oldBasePriceFcfa', 'FCFA'], ['Minimum', 'priceMinFcfa', 'oldPriceMinFcfa', 'FCFA'],
+    ['Maximum', 'priceMaxFcfa', 'oldPriceMaxFcfa', 'FCFA'], ['Durée', 'estimatedDurationMin', 'oldEstimatedDurationMin', 'min'] ];
+  const nz = (v) => v == null ? '—' : fmt.format(v);
+
+  function corridorRowHtml(c){
+    return `<div class="crow" data-cid="${esc(c.id)}"><div><b>${esc(c.label)}</b> · ${esc(c.code)} ${c.isActive ? '' : '<span class="tag tag-nowv">Désactivé</span>'}</div>` +
+      `<div class="paymsg">${esc(money(c.basePriceFcfa))} (fourchette ${esc(nz(c.priceMinFcfa))} – ${esc(nz(c.priceMaxFcfa))}) · ${esc(c.estimatedDurationMin == null ? '—' : c.estimatedDurationMin)} min · version ${esc(c.version)}</div>` +
+      `<div class="histacts"><button class="assignbtn" type="button" data-corr="edit">Modifier…</button>` +
+      `<button class="assignbtn" type="button" data-corr="${c.isActive ? 'off' : 'on'}">${c.isActive ? 'Désactiver…' : 'Réactiver…'}</button></div>` +
+      `<details class="hist" data-chist><summary>Historique</summary><div class="chistbox">Chargement…</div></details></div>`;
+  }
+  function corridorChangeHtml(h){
+    let detail;
+    if (h.kind === 'CREATED') detail = `Prix de base ${nz(h.basePriceFcfa)} FCFA (fourchette ${nz(h.priceMinFcfa)} – ${nz(h.priceMaxFcfa)}), ${nz(h.estimatedDurationMin)} min`;
+    else if (h.kind === 'UPDATED') detail = CORR_FIELDS.filter(([, k, o]) => h[k] !== h[o]).map(([l, k, o, u]) => `${esc(l)} : ${nz(h[o])} → <b>${nz(h[k])}</b> ${u}`).join(' · ');
+    else detail = h.kind === 'DEACTIVATED' ? 'Corridor désactivé' : 'Corridor réactivé';
+    return `<div class="tver"><b>v${esc(h.version)} · ${esc(CORR_KIND[h.kind] || h.kind)}</b> · ${esc(fmtDT(h.changedAt))} · ${esc(h.changedBy ? h.changedBy.fullName : '—')}` +
+      `<div>« ${esc(h.reason)} »</div><div class="chg">${detail}</div></div>`;
+  }
+  async function loadCorridors(){
+    const r = await api('/routes/admin');
+    if (!r.ok) throw new Error('Corridors indisponibles (HTTP ' + r.status + ').');
+    const d = await r.json(); corridors = d.routes; corrBounds = d.bounds;
+    $('corridorList').innerHTML = corridors.length ? corridors.map(corridorRowHtml).join('') : '<div class="empty">Aucun corridor.</div>';
+  }
+  // L'historique d'un corridor se charge à l'ouverture (l'événement « toggle » ne remonte pas : capture).
+  $('corridorList').addEventListener('toggle', async (e)=>{
+    const det = e.target; if (!det.matches || !det.matches('details[data-chist]') || !det.open) return;
+    const row = det.closest('[data-cid]'), box = det.querySelector('.chistbox');
+    try {
+      const r = await api('/routes/' + encodeURIComponent(row.dataset.cid) + '/history'), d = await r.json().catch(()=>[]);
+      if (!r.ok) throw new Error(apiError(d));
+      box.innerHTML = d.length ? d.map(corridorChangeHtml).join('') : '<div class="paymsg">Aucun changement depuis la création : valeurs d\'origine.</div>';
+    } catch (err) { if (!(err instanceof AuthRequired)) box.textContent = err.message; }
+  }, true);
+
+  function corrNumber(key, raw){
+    const b = corrBounds[key], t = String(raw).replace(/\s/g, ''), n = Number(t);
+    if (t === '' || !Number.isInteger(n)) throw new Error(`${b.label} : un nombre entier est attendu.`);
+    if (n < b.min || n > b.max) throw new Error(`${b.label} : entre ${fmt.format(b.min)} et ${fmt.format(b.max)} ${b.unit}.`);
+    return n;
+  }
+  // Lit et contrôle les quatre valeurs (le serveur refait les mêmes contrôles).
+  function corrValues(v){
+    const x = { basePriceFcfa: corrNumber('basePriceFcfa', v.base), priceMinFcfa: corrNumber('priceMinFcfa', v.min),
+      priceMaxFcfa: corrNumber('priceMaxFcfa', v.max), estimatedDurationMin: corrNumber('estimatedDurationMin', v.duration) };
+    if (x.priceMinFcfa > x.priceMaxFcfa) throw new Error('Le prix minimum ne peut pas dépasser le prix maximum.');
+    if (x.basePriceFcfa < x.priceMinFcfa || x.basePriceFcfa > x.priceMaxFcfa) throw new Error('Le prix de base doit rester entre le minimum et le maximum.');
+    return x;
+  }
+  function corrNumFields(c){
+    const f = (key, bk, label, cur) => ({ key, label, type:'text', required:true, value: c ? String(c[cur]) : '',
+      help: `Entre ${fmt.format(corrBounds[bk].min)} et ${fmt.format(corrBounds[bk].max)} ${corrBounds[bk].unit}` });
+    return [ f('base', 'basePriceFcfa', 'Prix de base (FCFA)', 'basePriceFcfa'), f('min', 'priceMinFcfa', 'Prix minimum indicatif (FCFA)', 'priceMinFcfa'),
+      f('max', 'priceMaxFcfa', 'Prix maximum indicatif (FCFA)', 'priceMaxFcfa'), f('duration', 'estimatedDurationMin', 'Durée estimée (minutes)', 'estimatedDurationMin') ];
+  }
+  const corrReason = (placeholder) => ({ key:'reason', label:'Motif (obligatoire)', type:'textarea', required:true, minLength:10, maxLength:500, placeholder });
+  // Un autre admin a changé le corridor entre-temps : on recharge la liste et on le dit.
+  async function corrCall(method, path, body){
+    try { return await callJson(method, path, body); }
+    catch (err) {
+      if (err.code === 'ROUTE_VERSION_STALE') { await loadCorridors().catch(()=>{}); throw new Error('Ce corridor a été modifié entre-temps : la liste est rechargée. Vérifie les valeurs, puis recommence.'); }
+      throw err;
+    }
+  }
+
+  $('corridorNew').addEventListener('click', ()=>{
+    if (!corrBounds) return;
+    setCorrMsg('');
+    openAction({
+      title: 'Nouveau corridor', sub: 'Ville ↔ AIBD ou ville ↔ ville. Le code ne change plus après la création.',
+      notice: 'Le prix de base est celui facturé pour ce trajet, dans les deux sens ; il doit rester entre le minimum et le maximum. Un corridor ne se supprime jamais : on le désactive.',
+      fields: [
+        { key:'code', label:'Code (majuscules, chiffres, tirets)', type:'text', required:true, minLength:3, maxLength:20, placeholder:'Ex. THS-TBA' },
+        { key:'label', label:'Nom du corridor', type:'text', required:true, minLength:3, maxLength:80, placeholder:'Ex. Thiès <-> Touba' },
+        { key:'city', label:'Ville (pour le tri)', type:'text', required:true, minLength:2, maxLength:60, placeholder:'Ex. Thiès' },
+        ...corrNumFields(null), corrReason('Ex. nouvelle liaison demandée par un hôpital partenaire') ],
+      submitLabel: 'Créer le corridor',
+      onSubmit: async (v) => {
+        const body = { code: v.code.toUpperCase(), label: v.label, city: v.city, ...corrValues(v), reason: v.reason };
+        await corrCall('POST', '/routes', body); await loadCorridors(); setCorrMsg(`Corridor ${body.code} créé ✓`);
+      },
+    });
+  });
+  function openEditCorridor(c){
+    openAction({
+      title: 'Modifier le corridor', sub: `${c.label} — ${c.code} · actuellement ${money(c.basePriceFcfa)}`,
+      notice: 'Ne s\'applique qu\'aux nouvelles réservations : celles qui existent gardent leur prix.',
+      fields: [ ...corrNumFields(c), corrReason('Ex. révision annuelle, hausse du carburant') ],
+      submitLabel: 'Enregistrer',
+      onSubmit: async (v) => {
+        const x = corrValues(v);
+        if (x.basePriceFcfa === c.basePriceFcfa && x.priceMinFcfa === c.priceMinFcfa && x.priceMaxFcfa === c.priceMaxFcfa && x.estimatedDurationMin === c.estimatedDurationMin) throw new Error('Aucun changement : ces valeurs sont déjà celles du corridor.');
+        await corrCall('PATCH', '/routes/' + encodeURIComponent(c.id), { ...x, basedOnVersion: c.version, reason: v.reason });
+        await loadCorridors(); setCorrMsg(`Corridor ${c.code} modifié ✓`);
+      },
+    });
+  }
+  function openToggleCorridor(c, activate){
+    openAction({
+      title: activate ? 'Réactiver le corridor' : 'Désactiver le corridor', sub: `${c.label} — ${c.code}`,
+      notice: activate ? 'Le corridor pourra de nouveau être choisi pour de nouvelles réservations.'
+        : 'Un corridor désactivé n\'est plus proposé pour de nouvelles réservations. Les réservations existantes ne changent pas. Il n\'est jamais supprimé : on peut le réactiver.',
+      fields: [ corrReason(activate ? 'Ex. liaison rouverte' : 'Ex. liaison suspendue') ],
+      submitLabel: activate ? 'Réactiver' : 'Désactiver', danger: !activate,
+      onSubmit: async (v) => {
+        await corrCall('POST', '/routes/' + encodeURIComponent(c.id) + (activate ? '/reactivate' : '/deactivate'), { basedOnVersion: c.version, reason: v.reason });
+        await loadCorridors(); setCorrMsg(`Corridor ${c.code} ${activate ? 'réactivé' : 'désactivé'} ✓`);
+      },
+    });
+  }
+  $('corridorList').addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-corr]'); if (!b) return;
+    const c = corridors.find(x => x.id === b.closest('[data-cid]').dataset.cid); if (!c) return;
+    setCorrMsg('');
+    if (b.dataset.corr === 'edit') openEditCorridor(c); else openToggleCorridor(c, b.dataset.corr === 'on');
+  });
 
   function setMsg(t,k){ const m=$('formmsg'); m.textContent=t; m.className='formmsg '+(k||''); }
   async function submit(){
