@@ -71,20 +71,34 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   l'est : un opérateur en service n'est jamais déconnecté pour inactivité.
 - **Nouvelle réservation** : passager, trajet libre (prix calculé depuis les deux
   adresses via Google Maps, péage compris) ou prix fixe, horaire, accessibilité.
-- **Courses à venir** : file de dispatch et affectation d'un chauffeur.
+- **Courses à venir** : file de dispatch et affectation d'un chauffeur (possible
+  tant que la course n'est pas partie).
+- **Boutons de statut** sur chaque course : **En route** (chauffeur affecté
+  obligatoire), **Terminée**, **Client absent**, **Annulée…** (motif obligatoire).
+  Seuls les boutons permis par l'état de la course sont proposés ; Terminée,
+  Annulée et Client absent sont définitifs.
 - **Paiement** : « Lien de paiement » par course (affichage, copie, envoi par
   WhatsApp au proche ou, à défaut, au passager), badge **Payé**, et
   « Vérifier le paiement » si la notification n'est pas arrivée.
 - **Une course non payée ne part pas** : le chauffeur peut être affecté à l'avance,
   mais la course affiche « En attente de paiement, départ bloqué » et l'API refuse
-  le passage à `EN_ROUTE` tant qu'elle n'est pas payée.
+  le passage à `EN_ROUTE` tant qu'elle n'est pas payée, sauf **dérogation de départ**.
+- **Dérogation de départ** (responsables et admins) : « Autoriser le départ… » avec un
+  motif obligatoire (10 caractères minimum). La course reste **non payée** ; la
+  dérogation (auteur, date, motif) est conservée. « Retirer la dérogation… » (motif)
+  est possible tant que la course n'est pas partie.
 - **Paiement reçu autrement** (responsables et admins) : confirme que l'argent est
   reçu par la société (note obligatoire, référence facultative) et débloque la
   course. L'**historique des paiements** de chaque course montre tout, annulations
   et remboursements compris. Un **admin** peut annuler une confirmation (motif
   obligatoire) ou marquer un remboursement.
-- **« À régler »** (responsables et admins) : les doubles paiements PayDunya à
-  rembourser, avec un compteur rouge.
+- **« À régler »** (responsables et admins), avec un compteur rouge :
+  - **À encaisser** : les courses non payées dont le départ a été autorisé par
+    dérogation, et les courses terminées non payées (signalées « sans dérogation »).
+    Elles y restent jusqu'au paiement (lien ou « Paiement reçu autrement… »).
+  - **À rembourser** : les doubles paiements PayDunya et l'argent reçu pour une course
+    **annulée**. Rien n'est remboursé automatiquement : un admin marque le
+    remboursement une fois fait à la main.
 - **Flotte** : ajout d'un chauffeur avec son véhicule.
 
 ---
@@ -94,7 +108,8 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
 - **Qui** : le personnel, par e-mail + mot de passe, avec trois rôles :
   - `OPERATOR` : réservations, affectation, liens de paiement, vérification d'un paiement ;
   - `MANAGER` (responsable des opérations) : tout l'OPERATOR, plus la confirmation
-    manuelle d'un paiement et le panneau « À régler » ;
+    manuelle d'un paiement, la dérogation de départ, l'annulation d'une course déjà
+    payée et le panneau « À régler » ;
   - `ADMIN` : tout, plus l'annulation d'une confirmation, le remboursement (et, plus
     tard, la correction de prix, les tarifs et les comptes).
 
@@ -198,8 +213,51 @@ d'IPN simultanés.
 
 **Départ bloqué** : `PATCH /api/bookings/:id/status` refuse `EN_ROUTE` (et
 `IN_PROGRESS` depuis un état d'avant le départ) tant que la course n'est pas payée,
-avec `409` et le code `PAYMENT_REQUIRED`. `COMPLETED`, `NO_SHOW` et `CANCELLED` ne sont
-jamais bloqués : ils enregistrent ce qui s'est passé.
+avec `409` et le code `PAYMENT_REQUIRED`, **sauf dérogation active**. `COMPLETED`,
+`NO_SHOW` et `CANCELLED` ne sont jamais bloqués : ils enregistrent ce qui s'est passé.
+
+### Dérogation de départ
+
+Pour faire partir une course non payée (client de confiance, convention avec un
+hôpital, sortie d'hôpital…), un **responsable ou un admin** l'autorise :
+`POST /api/bookings/:id/departure-waiver` avec un `reason` (10 à 500 caractères).
+
+- **La course reste non payée** (`paymentStatus` inchangé) : l'argent n'est pas
+  « reçu », donc les comptes et les reversements au chauffeur ne sont pas faussés.
+- Table `DepartureWaiver` : motif, auteur, date, et, si elle est retirée, auteur,
+  date et motif du retrait. Rien n'est effacé. Une seule dérogation active par course ;
+  impossible sur une course déjà payée ou déjà partie.
+- `POST /api/bookings/:id/departure-waiver/revoke` (`reason`) la retire, tant que la
+  course n'est pas partie : le départ est de nouveau bloqué.
+- `GET /api/bookings/to-collect` (responsables, admins) liste les courses « à encaisser ».
+
+### Statuts d'une course
+
+`PATCH /api/bookings/:id/status` (`status`, et `reason` pour l'annulation) suit une table
+de transitions côté serveur ; une transition interdite répond `409 INVALID_TRANSITION`.
+
+| De            | Vers permis                                          |
+|---------------|------------------------------------------------------|
+| `PENDING`     | `CONFIRMED`, `CANCELLED`                             |
+| `CONFIRMED`   | `CANCELLED`                                          |
+| `ASSIGNED`    | `EN_ROUTE`, `IN_PROGRESS`, `COMPLETED`, `NO_SHOW`, `CANCELLED` |
+| `EN_ROUTE`    | `IN_PROGRESS`, `COMPLETED`, `NO_SHOW`, `CANCELLED`   |
+| `IN_PROGRESS` | `COMPLETED`                                          |
+| autres        | aucune (`COMPLETED`, `CANCELLED`, `NO_SHOW` sont définitifs) |
+
+- `ASSIGNED` ne s'obtient que par l'affectation (`PATCH /api/bookings/:id/assign`), qui
+  est refusée dès que la course est partie ou terminée (`409`).
+- `EN_ROUTE` et `IN_PROGRESS` exigent un chauffeur affecté (`400 DRIVER_REQUIRED`).
+- **Annulation** : motif obligatoire (5 caractères minimum, `400 REASON_REQUIRED`),
+  conservé avec l'auteur et la date. Une course **non payée** peut être annulée par
+  tout le personnel ; une course **déjà payée** seulement par un responsable ou un
+  admin (`403 CANCEL_PAID_FORBIDDEN`).
+- **L'argent n'est jamais touché automatiquement.** Annuler une course payée ne rembourse
+  rien : le paiement apparaît dans « À rembourser » (remboursement intégral par défaut,
+  frais d'annulation plus tard) jusqu'à ce qu'un admin enregistre le remboursement. Les
+  liens PayDunya en attente sont abandonnés ; un lien payé après l'annulation est
+  enregistré `PAID` avec `isDuplicate`, à rembourser aussi.
+- **Client absent** (`NO_SHOW`) : le paiement est conservé, sans frais pour l'instant.
 
 ---
 
@@ -242,8 +300,11 @@ d'environnement — modifiables sans toucher au code.
 | `POST`  | `/api/bookings`                           | Créer une réservation                        |
 | `GET`   | `/api/bookings/upcoming`                  | File des courses à venir (avec tous leurs paiements) |
 | `GET`   | `/api/bookings/:id`                       | Détail d'une réservation                     |
-| `PATCH` | `/api/bookings/:id/assign`                | Affecter chauffeur + véhicule                |
-| `PATCH` | `/api/bookings/:id/status`                | Changer le statut (`EN_ROUTE` refusé si non payée) |
+| `GET`   | `/api/bookings/to-collect`                | Courses à encaisser (**MANAGER, ADMIN**)     |
+| `PATCH` | `/api/bookings/:id/assign`                | Affecter chauffeur + véhicule (avant le départ) |
+| `PATCH` | `/api/bookings/:id/status`                | Changer le statut (transitions contrôlées ; `EN_ROUTE` refusé si non payée sans dérogation ; motif pour annuler) |
+| `POST`  | `/api/bookings/:id/departure-waiver`      | Autoriser le départ d'une course non payée (**MANAGER, ADMIN**, motif) |
+| `POST`  | `/api/bookings/:id/departure-waiver/revoke` | Retirer la dérogation (**MANAGER, ADMIN**, motif) |
 | `GET`   | `/api/drivers`                            | Chauffeurs (`?assignable=true` : affectables)|
 | `POST`  | `/api/drivers`                            | Créer un chauffeur                           |
 | `PATCH` | `/api/drivers/:id/status`                 | Changer le statut d'un chauffeur             |
@@ -253,7 +314,7 @@ d'environnement — modifiables sans toucher au code.
 | `POST`  | `/api/payments/:id/check`                 | Vérifier un paiement auprès de PayDunya      |
 | `GET`   | `/api/payments/bookings/:bookingId`       | Historique complet des paiements d'une course |
 | `POST`  | `/api/payments/bookings/:bookingId/manual`| Confirmer un paiement reçu autrement (**MANAGER, ADMIN**) |
-| `GET`   | `/api/payments/to-refund`                 | Doubles paiements à rembourser (**MANAGER, ADMIN**) |
+| `GET`   | `/api/payments/to-refund`                 | Doubles paiements et paiements de courses annulées à rembourser (**MANAGER, ADMIN**) |
 | `POST`  | `/api/payments/:id/void`                  | Annuler une confirmation manuelle (**ADMIN**, motif) |
 | `POST`  | `/api/payments/:id/refund`                | Marquer un remboursement (**ADMIN**, motif et référence) |
 | `POST`  | `/api/payments/paydunya/ipn`              | Notification de paiement (appelée par PayDunya, **publique**) |
@@ -293,7 +354,7 @@ src/
   pricing/                 moteur de tarification (service + controller + DTO + test)
   maps/                    Google Maps : géocodage, itinéraire, péage
   routes/                  axes desservis
-  bookings/                réservations (service + controller + DTO)
+  bookings/                réservations (service + controller + DTO), dérogations de départ
   drivers/                 chauffeurs (création, liste, statut)
   vehicles/                véhicules
   payments/                paiement : interface PaymentProvider, fournisseur PayDunya, IPN,
@@ -313,6 +374,9 @@ prisma/
 - [x] Authentification du personnel (sessions, rôles ADMIN / MANAGER / OPERATOR)
 - [x] Confirmation manuelle des paiements, annulation, remboursement, double paiement,
       départ bloqué tant que la course n'est pas payée
+- [x] Dérogation de départ, boutons de statut dans la console (En route, Terminée,
+      Client absent, Annulée), « À encaisser » et « À rembourser »
+- [ ] Frais d'annulation (aujourd'hui : remboursement intégral)
 - [ ] Correction du prix d'une course par un admin (avec motif)
 - [ ] Modification des tarifs depuis la console par un admin (aujourd'hui dans `.env`)
 - [ ] Site et domaine, passage de PayDunya en mode live (URL IPN du vrai serveur)

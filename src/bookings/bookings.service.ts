@@ -1,27 +1,57 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Booking, BookingStatus, MobilityNeed, Prisma } from '@prisma/client';
+import { AuthUser, MANAGER_ROLES } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { generateBookingReference } from '../common/reference';
 import { PAYMENT_PEOPLE } from '../payments/payment.include';
+import { BEFORE_DEPARTURE, WAIVER_PEOPLE } from './departure-waivers.service';
 
 const ACTIVE_STATUSES: BookingStatus[] = [
   'PENDING', 'CONFIRMED', 'ASSIGNED', 'EN_ROUTE', 'IN_PROGRESS',
 ];
 
+// Transitions permises par PATCH /bookings/:id/status. ASSIGNED ne s'obtient que par
+// l'affectation (PATCH /bookings/:id/assign). COMPLETED, CANCELLED et NO_SHOW sont des
+// états finaux : pas de réouverture, on crée une nouvelle réservation.
+const TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
+  PENDING: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['CANCELLED'],
+  ASSIGNED: ['EN_ROUTE', 'IN_PROGRESS', 'COMPLETED', 'NO_SHOW', 'CANCELLED'],
+  EN_ROUTE: ['IN_PROGRESS', 'COMPLETED', 'NO_SHOW', 'CANCELLED'],
+  IN_PROGRESS: ['COMPLETED'],
+  COMPLETED: [],
+  CANCELLED: [],
+  NO_SHOW: [],
+};
+
+const STATUS_LABEL: Record<BookingStatus, string> = {
+  PENDING: 'en attente', CONFIRMED: 'confirmée', ASSIGNED: 'affectée', EN_ROUTE: 'en route',
+  IN_PROGRESS: 'en cours', COMPLETED: 'terminée', CANCELLED: 'annulée', NO_SHOW: 'client absent',
+};
+
 // Une course non payée ne part pas (carburant et temps) : le chauffeur peut être
-// affecté à l'avance, mais le départ est refusé tant que la course n'est pas payée.
-// Seuls EN_ROUTE et IN_PROGRESS, depuis un état d'avant le départ, sont bloqués :
-// COMPLETED, NO_SHOW et CANCELLED enregistrent ce qui s'est passé et ne le sont jamais,
-// et une course déjà partie n'est pas bloquée si son paiement est annulé ensuite.
+// affecté à l'avance, mais le départ (EN_ROUTE, ou IN_PROGRESS depuis un état d'avant
+// le départ) exige un chauffeur affecté ET une course payée OU une dérogation de départ
+// active (MANAGER, ADMIN). COMPLETED, NO_SHOW et CANCELLED enregistrent ce qui s'est
+// passé et ne sont jamais bloqués.
 const DEPARTURE_STATUSES: BookingStatus[] = ['EN_ROUTE', 'IN_PROGRESS'];
-const BEFORE_DEPARTURE_STATUSES: BookingStatus[] = ['PENDING', 'CONFIRMED', 'ASSIGNED'];
+
+const CANCEL_REASON_MIN = 5;
+
+const ERROR_NAME: Record<number, string> = { 400: 'Bad Request', 403: 'Forbidden', 409: 'Conflict' };
+
+/** Erreur 4xx avec un code que la console sait afficher (PAYMENT_REQUIRED, DRIVER_REQUIRED…). */
+function coded(statusCode: 400 | 403 | 409, code: string, message: string): HttpException {
+  return new HttpException({ statusCode, code, message, error: ERROR_NAME[statusCode] }, statusCode);
+}
 
 @Injectable()
 export class BookingsService {
@@ -164,6 +194,8 @@ export class BookingsService {
         // Tous les paiements de la course (la console en tire le lien en attente,
         // le paiement reçu, les doubles paiements et l'historique)
         payments: { orderBy: { createdAt: 'desc' }, include: PAYMENT_PEOPLE },
+        // Dérogations de départ (active ou retirées) : bandeau « départ autorisé sans paiement »
+        departureWaivers: { orderBy: { grantedAt: 'desc' }, include: WAIVER_PEOPLE },
       },
     });
   }
@@ -172,6 +204,10 @@ export class BookingsService {
   async assign(id: string, driverId: string, vehicleId: string): Promise<Booking> {
     const booking = await this.prisma.booking.findUnique({ where: { id } });
     if (!booking) throw new NotFoundException(`Réservation introuvable: ${id}`);
+    // Une course partie ou terminée ne se réaffecte pas (et une course finale ne ressuscite pas).
+    if (!BEFORE_DEPARTURE.includes(booking.status)) {
+      throw coded(409, 'INVALID_TRANSITION', `Affectation impossible : la course est ${STATUS_LABEL[booking.status]}.`);
+    }
 
     const driver = await this.prisma.driver.findUnique({ where: { id: driverId } });
     if (!driver) throw new NotFoundException(`Chauffeur introuvable: ${driverId}`);
@@ -189,42 +225,80 @@ export class BookingsService {
       );
     }
 
-    return this.prisma.booking.update({
-      where: { id },
-      data: {
-        driver: { connect: { id: driverId } },
-        vehicle: { connect: { id: vehicleId } },
-        status: BookingStatus.ASSIGNED,
-      },
+    // Mise à jour conditionnelle : si la course vient de partir ou d'être annulée, on n'écrase rien.
+    const { count } = await this.prisma.booking.updateMany({
+      where: { id, status: { in: BEFORE_DEPARTURE } },
+      data: { driverId, vehicleId, status: BookingStatus.ASSIGNED },
     });
+    if (count === 0) {
+      throw coded(409, 'INVALID_TRANSITION', "La course vient de changer d'état : affectation refusée.");
+    }
+    return this.prisma.booking.findUniqueOrThrow({ where: { id } });
   }
 
-  /** Transition d'état avec horodatage automatique. */
-  async updateStatus(id: string, status: BookingStatus): Promise<Booking> {
+  /**
+   * Transition d'état (table TRANSITIONS), avec horodatage automatique.
+   * - EN_ROUTE / IN_PROGRESS : chauffeur affecté obligatoire ; depuis un état d'avant le
+   *   départ, la course doit être payée OU avoir une dérogation de départ active.
+   * - CANCELLED : motif obligatoire ; une course PAYÉE ne peut être annulée que par un
+   *   MANAGER ou un ADMIN (l'annulation crée un remboursement à faire, qui reste un
+   *   acte explicite d'un admin : les paiements ne sont jamais touchés automatiquement).
+   * - États finaux : COMPLETED, CANCELLED, NO_SHOW.
+   */
+  async updateStatus(id: string, status: BookingStatus, user: AuthUser, reason?: string): Promise<Booking> {
     const booking = await this.prisma.booking.findUnique({ where: { id } });
     if (!booking) throw new NotFoundException(`Réservation introuvable: ${id}`);
 
-    if (
-      DEPARTURE_STATUSES.includes(status) &&
-      BEFORE_DEPARTURE_STATUSES.includes(booking.status) &&
-      booking.paymentStatus !== 'PAID'
-    ) {
-      throw new ConflictException({
-        statusCode: 409,
-        code: 'PAYMENT_REQUIRED',
-        message:
-          'Course non payée : départ bloqué. Le paiement doit être reçu (lien PayDunya) ou confirmé par un responsable.',
-        error: 'Conflict',
-      });
+    if (!TRANSITIONS[booking.status].includes(status)) {
+      throw coded(409, 'INVALID_TRANSITION',
+        `Transition impossible : la course est ${STATUS_LABEL[booking.status]}, elle ne peut pas passer à « ${STATUS_LABEL[status]} ».`);
     }
 
-    const stamps: Partial<Record<BookingStatus, Prisma.BookingUpdateInput>> = {
-      COMPLETED: { completedAt: new Date() },
-      CANCELLED: { cancelledAt: new Date() },
-    };
-    return this.prisma.booking.update({
-      where: { id },
-      data: { status, ...(stamps[status] ?? {}) },
+    const motif = reason?.trim();
+    if (status === 'CANCELLED') {
+      if (!motif || motif.length < CANCEL_REASON_MIN) {
+        throw coded(400, 'REASON_REQUIRED', `Motif d'annulation obligatoire (${CANCEL_REASON_MIN} caractères minimum).`);
+      }
+      if (booking.paymentStatus === 'PAID' && !MANAGER_ROLES.includes(user.role)) {
+        throw coded(403, 'CANCEL_PAID_FORBIDDEN',
+          'Cette course est payée : seul un responsable ou un admin peut l\'annuler (un remboursement sera à faire).');
+      }
+    }
+
+    if (DEPARTURE_STATUSES.includes(status)) {
+      if (!booking.driverId) {
+        throw coded(400, 'DRIVER_REQUIRED', 'Affecter un chauffeur avant le départ.');
+      }
+      if (BEFORE_DEPARTURE.includes(booking.status) && booking.paymentStatus !== 'PAID') {
+        const waived = await this.prisma.departureWaiver.count({ where: { bookingId: id, revokedAt: null } });
+        if (waived === 0) {
+          throw coded(409, 'PAYMENT_REQUIRED',
+            'Course non payée : départ bloqué. Le paiement doit être reçu (lien PayDunya), confirmé ou le départ autorisé par un responsable.');
+        }
+      }
+    }
+
+    const now = new Date();
+    const data: Prisma.BookingUpdateManyMutationInput & { cancelledById?: string } = { status };
+    if (status === 'COMPLETED') data.completedAt = now;
+    if (status === 'CANCELLED') Object.assign(data, { cancelledAt: now, cancelReason: motif, cancelledById: user.id });
+
+    // Mise à jour conditionnelle : un double clic ou deux opérateurs ne passent qu'une fois.
+    const allowedFrom = (Object.keys(TRANSITIONS) as BookingStatus[]).filter((s) => TRANSITIONS[s].includes(status));
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const { count } = await tx.booking.updateMany({ where: { id, status: { in: allowedFrom } }, data });
+      if (count === 0) {
+        throw coded(409, 'INVALID_TRANSITION', "La course vient de changer d'état : action refusée.");
+      }
+      if (status === 'CANCELLED') {
+        // Les liens PayDunya en attente sont abandonnés chez nous. S'ils sont payés ensuite,
+        // l'IPN enregistre l'argent comme « reçu pour une course annulée », à rembourser.
+        await tx.payment.updateMany({
+          where: { bookingId: id, source: 'GATEWAY', status: 'PENDING' },
+          data: { status: 'CANCELLED', note: 'Course annulée' },
+        });
+      }
     });
+    return this.prisma.booking.findUniqueOrThrow({ where: { id } });
   }
 }

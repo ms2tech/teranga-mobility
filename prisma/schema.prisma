@@ -145,6 +145,9 @@ model User {
   paymentsConfirmed Payment[] @relation("PaymentConfirmedBy")
   paymentsVoided    Payment[] @relation("PaymentVoidedBy")
   paymentsRefunded  Payment[] @relation("PaymentRefundedBy")
+  bookingsCancelled Booking[] @relation("BookingCancelledBy")
+  waiversGranted    DepartureWaiver[] @relation("WaiverGrantedBy")
+  waiversRevoked    DepartureWaiver[] @relation("WaiverRevokedBy")
 
   @@index([role])
 }
@@ -319,15 +322,43 @@ model Booking {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   completedAt DateTime?
-  cancelledAt DateTime?
+  // Annulation (statut CANCELLED) : motif obligatoire, auteur et date
+  cancelledAt  DateTime?
+  cancelReason String?
+  cancelledById String?
+  cancelledBy   User?   @relation("BookingCancelledBy", fields: [cancelledById], references: [id])
 
-  payments Payment[]
-  payout   DriverPayout?
+  payments         Payment[]
+  departureWaivers DepartureWaiver[]
+  payout           DriverPayout?
 
   @@index([status])
   @@index([scheduledAt])
   @@index([clientId])
   @@index([driverId])
+}
+
+// Dérogation de départ : un MANAGER ou un ADMIN autorise le départ d'une course
+// NON payée (client de confiance, convention avec un hôpital, sortie d'hôpital…),
+// avec un motif obligatoire. La course reste non payée : elle figure dans « À régler »
+// comme « à encaisser » jusqu'au paiement. Les lignes ne sont jamais effacées : un
+// retrait (avant le départ) ajoute revoked*, et une nouvelle dérogation est une
+// nouvelle ligne. Au plus une dérogation active (revokedAt nul) par course.
+model DepartureWaiver {
+  id          String   @id @default(cuid())
+  bookingId   String
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+  reason      String
+  grantedById String
+  grantedBy   User     @relation("WaiverGrantedBy", fields: [grantedById], references: [id])
+  grantedAt   DateTime @default(now())
+
+  revokedById  String?
+  revokedBy    User?     @relation("WaiverRevokedBy", fields: [revokedById], references: [id])
+  revokedAt    DateTime?
+  revokeReason String?
+
+  @@index([bookingId])
 }
 
 // Encaissement client : tentative via l'agrégateur (PayDunya) ou confirmation

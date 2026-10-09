@@ -159,10 +159,14 @@ export class ManualPaymentsService {
     return refunded;
   }
 
-  /** Doubles paiements à rembourser : le contenu du panneau « À régler ». */
+  /**
+   * « À rembourser » du panneau « À régler » : les doubles paiements, et les paiements
+   * reçus pour une course ANNULÉE (annulation d'une course payée, ou lien payé après
+   * l'annulation). Rien n'est remboursé automatiquement : c'est un acte explicite d'un admin.
+   */
   listToRefund() {
     return this.prisma.payment.findMany({
-      where: { isDuplicate: true, status: 'PAID' },
+      where: { status: 'PAID', OR: [{ isDuplicate: true }, { booking: { status: 'CANCELLED' } }] },
       orderBy: { paidAt: 'asc' },
       select: {
         id: true,
@@ -171,8 +175,16 @@ export class ManualPaymentsService {
         provider: true,
         providerRef: true,
         receiptUrl: true,
+        isDuplicate: true,
+        source: true,
         booking: {
-          select: { id: true, reference: true, client: { select: { fullName: true, phone: true } } },
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            cancelReason: true,
+            client: { select: { fullName: true, phone: true } },
+          },
         },
       },
     });

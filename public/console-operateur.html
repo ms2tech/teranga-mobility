@@ -147,6 +147,20 @@
   .btn.danger { background:#b3261e; }
   .btn.danger:hover { background:#8f1d17; }
   .dialog #actionExtra { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  /* Dérogation de départ, boutons de statut, « À encaisser » */
+  .waived { font-size:12.5px; font-weight:600; color:#6b4a0a; background:var(--accent-tint); border:1px solid #ecd2a0; border-radius:var(--radius-sm); padding:8px 10px; line-height:1.5; }
+  .waived b { color:#8a5a00; }
+  .stbar { margin-top:10px; display:flex; flex-wrap:wrap; gap:6px; }
+  .stbtn { font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--ink); padding:7px 13px; border-radius:var(--radius-sm); }
+  .stbtn:hover:not(:disabled) { background:var(--primary-tint); }
+  .stbtn.go { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .stbtn.go:hover:not(:disabled) { background:var(--primary-dark); }
+  .stbtn.danger { color:#b3261e; border-color:#e8b9b3; }
+  .stbtn.danger:hover:not(:disabled) { background:#fde4e1; }
+  .stbtn:disabled { opacity:.5; cursor:not-allowed; }
+  .tag-wv { background:var(--accent-tint); color:#8a5a00; }
+  .tag-nowv { background:#fde4e1; color:#b3261e; }
+  .sectitle { font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--primary); font-weight:800; margin:10px 0 4px; }
   .pay { margin-top:10px; display:flex; flex-direction:column; gap:8px; }
   .paidbox { font-size:12.5px; font-weight:600; color:#166534; background:#d6efdd; border-radius:var(--radius-sm); padding:7px 10px; }
   .paidbox a { color:#166534; }
@@ -312,8 +326,7 @@
       <div class="panel-head"><h2 id="ttl-queue">Courses à venir</h2><span class="updated" id="updated" aria-live="off"></span>
         <div class="queue-tools"><button class="iconbtn hidden" id="refundToggle" type="button">À régler<span class="countbadge hidden" id="refundCount">0</span></button><button class="iconbtn" id="fleetToggle">+ Flotte</button><button class="iconbtn" id="refresh">Actualiser</button></div></div>
       <div class="fleet hidden" id="refundPanel">
-        <p class="section-label" style="margin-bottom:8px;"><span class="num">!</span> À régler — doubles paiements à rembourser</p>
-        <p class="help" style="margin:0 0 6px;">Ces paiements PayDunya sont arrivés alors que la course était déjà payée. L'argent est à rendre au client (par PayDunya ou autrement), puis à marquer remboursé ici.</p>
+        <p class="section-label" style="margin-bottom:4px;"><span class="num">!</span> À régler</p>
         <div id="refundList"></div>
       </div>
       <div class="fleet hidden" id="fleetPanel">
@@ -389,7 +402,7 @@
   // ── Session et rafraîchissement automatique ─────────────────────────────
   class AuthRequired extends Error {}
   let currentUser = null, timer = null, lastSig = '', lastApi = Date.now(), lastRefreshAt = 0, busy = 0;
-  let lastList = [], lastToRefund = [];   // dernières données affichées (courses, doubles paiements à rembourser)
+  let lastList = [], lastToRefund = [], lastToCollect = [];   // dernières données affichées (courses, à rembourser, à encaisser)
 
   // Rôles du personnel. OPERATOR : réservations, affectation, liens, vérification.
   // MANAGER : + confirmation manuelle « Autre » et panneau « À régler ». ADMIN : + annulation, remboursement.
@@ -438,7 +451,7 @@
     await refreshAll(true); startTimers();
   }
   function wipeData(){
-    drivers = []; lastSig = ''; lastList = []; lastToRefund = []; renderRefundPanel(); closeAction();
+    drivers = []; lastSig = ''; lastList = []; lastToRefund = []; lastToCollect = []; renderRefundPanel(); closeAction();
     $('queue').innerHTML = '<div class="empty">Connecte-toi pour voir les courses.</div>';
     $('updated').textContent = '';
     resetForm();
@@ -517,18 +530,20 @@
   async function refreshAll(force){
     if (!currentUser || (busy > 0 && !force)) return;
     try{
-      // Les responsables et admins reçoivent aussi les doubles paiements à rembourser (panneau « À régler »).
-      const [dr, qr, tr] = await Promise.all([api('/drivers?assignable=true'), api('/bookings/upcoming'), isManager() ? api('/payments/to-refund') : null]);
+      // Les responsables et admins reçoivent aussi « à rembourser » et « à encaisser » (panneau « À régler »).
+      const [dr, qr, tr, cr] = await Promise.all([api('/drivers?assignable=true'), api('/bookings/upcoming'),
+        isManager() ? api('/payments/to-refund') : null, isManager() ? api('/bookings/to-collect') : null]);
       if (!dr.ok || !qr.ok) throw new Error('HTTP ' + (dr.ok ? qr.status : dr.status));
       const drv = await dr.json(), list = await qr.json();
       const toRefund = tr && tr.ok ? await tr.json() : [];
+      const toCollect = cr && cr.ok ? await cr.json() : [];
       setStatus('ok','API connectée'); lastRefreshAt = Date.now();
       $('updated').textContent = 'Mis à jour à ' + new Date().toLocaleTimeString('fr-FR');
       drivers = drv;
-      const sig = JSON.stringify([drv, list, toRefund]);
+      const sig = JSON.stringify([drv, list, toRefund, toCollect]);
       if (!force && sig === lastSig) return;
       if (!force && document.querySelector('#queue .assign-box:not(.hidden)')) return;
-      lastSig = sig; lastToRefund = toRefund; renderQueue(list); renderRefundPanel();
+      lastSig = sig; lastToRefund = toRefund; lastToCollect = toCollect; renderQueue(list); renderRefundPanel();
     }catch(e){
       if (e instanceof AuthRequired) return;
       setStatus('down','API injoignable');
@@ -684,25 +699,63 @@
     }
     return `<div class="histrow">${l.join('<br>')}${acts ? `<div class="histacts">${acts}</div>` : ''}</div>`;
   }
+  // Dérogation de départ : active tant qu'elle n'est pas retirée (voir DepartureWaiversService).
+  const waiversOf = (b) => Array.isArray(b.departureWaivers) ? b.departureWaivers : [];
+  const activeWaiver = (b) => waiversOf(b).find(w => !w.revokedAt) || null;
+  function waiverRow(w){
+    const l = [`${esc(fmtDT(w.grantedAt))} · Dérogation de départ · <b>${w.revokedAt ? 'Retirée' : 'Active'}</b>`,
+      `Accordée par ${esc(w.grantedBy ? w.grantedBy.fullName : '—')} : ${esc(w.reason)}`];
+    if (w.revokedAt) l.push(`Retirée par ${esc(w.revokedBy ? w.revokedBy.fullName : '—')} le ${esc(fmtDT(w.revokedAt))} : ${esc(w.revokeReason)}`);
+    return `<div class="histrow">${l.join('<br>')}</div>`;
+  }
+  function waivedBox(w){
+    return `<div class="waived">Départ autorisé sans paiement — par ${esc(w.grantedBy ? w.grantedBy.fullName : '—')}, le ${esc(fmtDT(w.grantedAt))}<br>Motif : ${esc(w.reason)}<br><b>À encaisser</b></div>`;
+  }
   function payBlock(b){
     const ps = paymentsOf(b);
     const paid = ps.find(p => p.status === 'PAID' && !p.isDuplicate);
     const dups = ps.filter(p => p.status === 'PAID' && p.isDuplicate);
+    const w = activeWaiver(b);
     let h = '';
     if (b.paymentStatus === 'PAID') {
       h += paid ? paidBox(paid) : '<div class="paidbox">Paiement reçu ✓</div>';
     } else {
-      // Une course non payée ne part pas : le chauffeur peut être affecté, mais pas « en route ».
-      if (BEFORE_DEPARTURE.includes(b.status)) h += '<div class="blocked">En attente de paiement, départ bloqué</div>';
-      else if (b.status === 'EN_ROUTE' || b.status === 'IN_PROGRESS') h += '<div class="unpaidnote">Course en cours, non payée</div>';
+      // Une course non payée ne part pas : le chauffeur peut être affecté, mais pas « en route »,
+      // sauf dérogation d'un responsable (la course reste alors à encaisser).
+      if (w) {
+        h += waivedBox(w);
+        if (isManager() && BEFORE_DEPARTURE.includes(b.status)) h += '<div><button class="assignbtn" data-action="unwaive">Retirer la dérogation…</button></div>';
+      } else if (BEFORE_DEPARTURE.includes(b.status)) {
+        h += `<div class="blocked">En attente de paiement, départ bloqué${isManager() ? '' : ' — demandez à un responsable'}</div>`;
+        if (isManager()) h += '<div><button class="assignbtn" data-action="waive">Autoriser le départ…</button></div>';
+      } else if (b.status === 'EN_ROUTE' || b.status === 'IN_PROGRESS') h += '<div class="unpaidnote">Course en cours, non payée</div>';
       else if (b.status === 'COMPLETED') h += '<div class="unpaidnote">Course terminée, non payée</div>';
       if (b.paymentStatus === 'REFUNDED') h += '<div class="unpaidnote">Paiement remboursé</div>';
       h += linkBlock(b, ps);
       if (isManager()) h += '<div><button class="assignbtn" data-action="manual">Paiement reçu autrement…</button></div>';
     }
     h += dups.map(dupBox).join('');
-    if (ps.length) h += `<details class="hist"><summary>Historique des paiements (${ps.length})</summary>${ps.map(histRow).join('')}</details>`;
+    // Historique : paiements et dérogations, du plus récent au plus ancien.
+    const items = [...ps.map(p => ({ t: p.createdAt, html: histRow(p) })), ...waiversOf(b).map(x => ({ t: x.grantedAt, html: waiverRow(x) }))]
+      .sort((a, c) => new Date(c.t) - new Date(a.t));
+    if (items.length) h += `<details class="hist"><summary>Historique (${items.length})</summary>${items.map(i => i.html).join('')}</details>`;
     return `<div class="pay">${h}<span class="paymsg" role="status"></span></div>`;
+  }
+
+  // Boutons de statut : En route, Terminée, Client absent, Annulée (voir BookingsService.updateStatus).
+  // « En route » exige un chauffeur affecté et une course payée ou une dérogation ; le serveur applique les règles.
+  function statusButtons(b){
+    const s = b.status, paid = b.paymentStatus === 'PAID', out = [];
+    if (s === 'ASSIGNED' && b.driver) {
+      const ok = paid || !!activeWaiver(b);
+      out.push(ok ? '<button class="stbtn go" data-action="st-EN_ROUTE">En route</button>'
+                  : '<button class="stbtn go" disabled title="En attente de paiement, départ bloqué">En route</button>');
+    }
+    if (['ASSIGNED','EN_ROUTE','IN_PROGRESS'].includes(s)) out.push('<button class="stbtn" data-action="st-COMPLETED">Terminée</button>');
+    if (['ASSIGNED','EN_ROUTE'].includes(s)) out.push('<button class="stbtn" data-action="st-NO_SHOW">Client absent</button>');
+    // Annuler une course PAYÉE crée un remboursement à faire : réservé aux responsables et admins.
+    if (['PENDING','CONFIRMED','ASSIGNED','EN_ROUTE'].includes(s) && (!paid || isManager())) out.push('<button class="stbtn danger" data-action="st-CANCELLED">Annulée…</button>');
+    return out.length ? `<div class="stbar">${out.join('')}</div>` : '';
   }
   function setPayMsg(card,t,isErr){ const m=card&&card.querySelector('.paymsg'); if(m){ m.textContent=t; m.className='paymsg'+(isErr?' err':''); } }
 
@@ -730,6 +783,7 @@
           <div class="route">${esc(b.pickupAddress)}<span class="arrow">→</span>${esc(b.dropoffAddress)}</div>
           <div class="meta"><span>${esc(when2(b))}</span><span class="price">${esc(money(b.totalPriceFcfa))}</span></div>
           ${action}
+          ${statusButtons(b)}
           ${payBlock(b)}
         </div>`;
       }).join('');
@@ -749,6 +803,10 @@
     if(act==='manual'){ openManualDialog(id); return; }
     if(act==='void'){ openVoidDialog(btn.dataset.payment); return; }
     if(act==='refund'){ openRefundDialog(btn.dataset.payment); return; }
+    if(act==='waive'){ openWaiveDialog(id); return; }
+    if(act==='unwaive'){ openUnwaiveDialog(id); return; }
+    if(act==='st-EN_ROUTE'){ await departNow(card, id); return; }
+    if(act.startsWith('st-')){ openStatusDialog(id, act.slice(3)); return; }
 
     if(act==='confirm'){
       const sel=card.querySelector('.assign-select'); if(!sel||!sel.value)return;
@@ -847,15 +905,18 @@
     if (!r.ok) throw new Error(apiError(d));
     return d;
   }
+  // Une course peut venir de la file active ou du panneau « À encaisser » (une course terminée
+  // n'est plus dans la file) : les dialogues cherchent dans les deux.
+  const findBooking = (id) => lastList.find(x => x.id === id) || lastToCollect.find(x => x.id === id);
   function findPayment(id){
-    for (const b of lastList) { const p = paymentsOf(b).find(x => x.id === id); if (p) return { b, p, ref: b.reference, amount: p.amountFcfa }; }
+    for (const b of [...lastList, ...lastToCollect]) { const p = paymentsOf(b).find(x => x.id === id); if (p) return { b, p, ref: b.reference, amount: p.amountFcfa }; }
     const t = lastToRefund.find(x => x.id === id);
     return t ? { p: t, ref: t.booking.reference, amount: t.amountFcfa } : null;
   }
 
   // Paiement reçu autrement (MANAGER, ADMIN) : « Autre », montant = total de la course, note obligatoire.
   function openManualDialog(bookingId){
-    const b = lastList.find(x => x.id === bookingId); if (!b) return;
+    const b = findBooking(bookingId); if (!b) return;
     const pend = paymentsOf(b).find(p => p.source === 'GATEWAY' && p.status === 'PENDING');
     openAction({
       title: 'Paiement reçu autrement',
@@ -909,21 +970,103 @@
     });
   }
 
-  // Panneau « À régler » (MANAGER, ADMIN) : doubles paiements à rembourser.
+  // ── Dérogation de départ (MANAGER, ADMIN) ───────────────────────────────
+  function openWaiveDialog(id){
+    const b = findBooking(id); if (!b) return;
+    openAction({
+      title: 'Autoriser le départ sans paiement',
+      sub: `${b.reference} — ${money(b.totalPriceFcfa)}`,
+      notice: "La course reste non payée : elle apparaîtra dans « À régler » comme « à encaisser » jusqu'au paiement. Votre nom, la date et le motif sont enregistrés.",
+      fields: [{ key:'reason', label:'Motif (obligatoire)', type:'textarea', required:true, minLength:10, maxLength:500, placeholder:"Ex. client de confiance, convention avec l'hôpital, sortie d'hôpital…" }],
+      submitLabel: 'Autoriser le départ',
+      onSubmit: async (v) => { await postJson(`/bookings/${encodeURIComponent(id)}/departure-waiver`, { reason: v.reason }); },
+    });
+  }
+  function openUnwaiveDialog(id){
+    const b = findBooking(id); if (!b) return;
+    openAction({
+      title: 'Retirer la dérogation',
+      sub: `${b.reference} — ${money(b.totalPriceFcfa)}`,
+      notice: "Le départ sera de nouveau bloqué tant que la course n'est pas payée. La dérogation reste dans l'historique, avec votre nom et le motif du retrait.",
+      fields: [{ key:'reason', label:'Motif du retrait (obligatoire)', type:'textarea', required:true, minLength:10, maxLength:500, placeholder:'Ex. accordée par erreur, le client a finalement payé…' }],
+      submitLabel: 'Retirer la dérogation', danger: true,
+      onSubmit: async (v) => { await postJson(`/bookings/${encodeURIComponent(id)}/departure-waiver/revoke`, { reason: v.reason }); },
+    });
+  }
+
+  // ── Boutons de statut ─────────────────────────────────────────────────
+  async function patchStatus(id, status, reason){
+    const r = await api(`/bookings/${encodeURIComponent(id)}/status`, { method:'PATCH', headers: JSON_HEADERS, body: JSON.stringify(reason ? { status, reason } : { status }) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(apiError(d));
+    return d;
+  }
+  // « En route » : action directe (le serveur refuse si la course n'est pas payée ni dérogée, ou sans chauffeur).
+  async function departNow(card, id){
+    setPayMsg(card, 'Passage en route…');
+    try { await patchStatus(id, 'EN_ROUTE'); await refreshAll(true); }
+    catch (err) { if (!(err instanceof AuthRequired)) setPayMsg(card, err.message, true); }
+  }
+  // Terminée, Client absent, Annulée : définitifs, donc confirmés (l'annulation exige un motif).
+  function openStatusDialog(id, status){
+    const b = findBooking(id); if (!b) return;
+    const who = b.client ? b.client.fullName : 'Passager', paid = b.paymentStatus === 'PAID';
+    const cfg = { sub: `${b.reference} — ${who}`, fields: [], onSubmit: async (v) => { await patchStatus(id, status, v.reason); } };
+    if (status === 'COMPLETED') {
+      Object.assign(cfg, { title: 'Course terminée', submitLabel: 'Marquer terminée',
+        notice: paid ? '' : "Cette course n'est pas payée : elle restera dans « À régler » (à encaisser) jusqu'au paiement." });
+    } else if (status === 'NO_SHOW') {
+      Object.assign(cfg, { title: 'Client absent', submitLabel: 'Client absent', danger: true,
+        notice: "Le passager ne s'est pas présenté. Un paiement éventuel est conservé : rien n'est remboursé." });
+    } else {
+      Object.assign(cfg, { title: 'Annuler la course', submitLabel: 'Annuler la course', danger: true,
+        notice: paid ? "Cette course est payée : l'annulation crée un remboursement à faire (panneau « À régler »). Rien n'est remboursé automatiquement." : '',
+        fields: [{ key:'reason', label:"Motif de l'annulation (obligatoire)", type:'textarea', required:true, minLength:5, maxLength:500, placeholder:'Ex. le client a annulé par téléphone…' }] });
+    }
+    openAction(cfg);
+  }
+
+  // ── Panneau « À régler » (MANAGER, ADMIN) : à encaisser et à rembourser ──────────
+  const STATUS_FR = { PENDING:'en attente', CONFIRMED:'confirmée', ASSIGNED:'affectée', EN_ROUTE:'en route', IN_PROGRESS:'en cours', COMPLETED:'terminée' };
+  function collectRow(b){
+    const w = activeWaiver(b), cl = b.client;
+    const tag = w ? '<span class="tag tag-wv">Dérogation</span>' : '<span class="tag tag-nowv">sans dérogation</span>';
+    const info = w ? `Départ autorisé par ${esc(w.grantedBy ? w.grantedBy.fullName : '—')} le ${esc(fmtDT(w.grantedAt))} : ${esc(w.reason)}`
+                   : 'Course terminée sans paiement ni dérogation de départ.';
+    return `<div class="refundrow" data-id="${esc(b.id)}">
+      <div><b>${esc(b.reference)}</b> ${tag} · ${esc(STATUS_FR[b.status] || b.status)} · ${esc(money(b.totalPriceFcfa))}</div>
+      <div>${cl ? `${esc(cl.fullName)} · ${esc(cl.phone)}` : ''}</div>
+      <div class="paidmeta">${info}</div>
+      ${linkBlock(b, paymentsOf(b))}
+      <div><button class="assignbtn" data-action="manual">Paiement reçu autrement…</button></div>
+      <span class="paymsg" role="status"></span></div>`;
+  }
+  function refundRow(x){
+    const cl = x.booking.client, cancelled = x.booking.status === 'CANCELLED';
+    const what = cancelled ? `Course annulée${x.booking.cancelReason ? ` (${esc(x.booking.cancelReason)})` : ''}` : 'Double paiement';
+    const via = x.source === 'MANUAL' ? 'confirmés manuellement' : 'reçus via PayDunya';
+    return `<div class="refundrow"><div><b>${esc(x.booking.reference)}</b>${cl ? ` · ${esc(cl.fullName)} · ${esc(cl.phone)}` : ''}</div>
+      <div>${what} : ${esc(money(x.amountFcfa))} ${via} le ${esc(fmtDT(x.paidAt))}${safeUrl(x.receiptUrl) ? ` · <a href="${esc(safeUrl(x.receiptUrl))}" target="_blank" rel="noopener noreferrer">Reçu</a>` : ''}</div>
+      ${isAdmin() ? `<button class="assignbtn" data-refund="${esc(x.id)}">Marquer remboursé…</button>` : '<span class="paymsg">Le remboursement est réservé à un administrateur.</span>'}</div>`;
+  }
   function renderRefundPanel(){
-    const manager = isManager(), n = lastToRefund.length;
+    const manager = isManager(), nc = lastToCollect.length, nr = lastToRefund.length, n = nc + nr;
     $('refundToggle').classList.toggle('hidden', !manager);
     const c = $('refundCount'); c.textContent = String(n); c.classList.toggle('hidden', n === 0);
     if (!manager) { $('refundPanel').classList.add('hidden'); return; }
-    $('refundList').innerHTML = n ? lastToRefund.map(x => {
-      const cl = x.booking.client;
-      return `<div class="refundrow"><div><b>${esc(x.booking.reference)}</b>${cl ? ` · ${esc(cl.fullName)} · ${esc(cl.phone)}` : ''}</div>
-        <div>${esc(money(x.amountFcfa))} reçus en double via PayDunya le ${esc(fmtDT(x.paidAt))}${safeUrl(x.receiptUrl) ? ` · <a href="${esc(safeUrl(x.receiptUrl))}" target="_blank" rel="noopener noreferrer">Reçu</a>` : ''}</div>
-        ${isAdmin() ? `<button class="assignbtn" data-refund="${esc(x.id)}">Marquer remboursé…</button>` : '<span class="paymsg">Le remboursement est réservé à un administrateur.</span>'}</div>`;
-    }).join('') : '<div class="empty">Rien à régler.</div>';
+    $('refundList').innerHTML =
+      `<div class="sectitle">À encaisser (${nc})</div>` +
+      (nc ? `<p class="help" style="margin:0 0 4px;">Courses non payées : départ autorisé par dérogation, ou terminées sans dérogation. Elles restent ici jusqu'au paiement.</p>${lastToCollect.map(collectRow).join('')}` : '<div class="empty">Rien à encaisser.</div>') +
+      `<div class="sectitle" style="margin-top:14px;">À rembourser (${nr})</div>` +
+      (nr ? `<p class="help" style="margin:0 0 4px;">Argent reçu à rendre au client (double paiement, course annulée). Le remboursement se fait hors de l'application, puis se marque ici.</p>${lastToRefund.map(refundRow).join('')}` : '<div class="empty">Rien à rembourser.</div>');
   }
   $('refundToggle').addEventListener('click', ()=>$('refundPanel').classList.toggle('hidden'));
-  $('refundList').addEventListener('click', (e)=>{ const b = e.target.closest('[data-refund]'); if (b) openRefundDialog(b.dataset.refund); });
+  $('refundList').addEventListener('click', async (e)=>{
+    const rb = e.target.closest('[data-refund]'); if (rb) { openRefundDialog(rb.dataset.refund); return; }
+    const btn = e.target.closest('[data-action]'); if (!btn) return;
+    const row = btn.closest('.refundrow'); if (!row) return;
+    busy++; try { await runAction(btn, row, row.dataset.id, btn.dataset.action); } finally { busy--; }
+  });
 
   function setMsg(t,k){ const m=$('formmsg'); m.textContent=t; m.className='formmsg '+(k||''); }
   async function submit(){

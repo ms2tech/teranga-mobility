@@ -123,16 +123,17 @@ export class PaymentsService {
 
       if (count > 0 && result.status === 'PAID') {
         // Le premier paiement valide gagne. Si la course est déjà payée (par une
-        // confirmation manuelle, par exemple), cet argent est bien arrivé mais
-        // n'est pas appliqué : double paiement, à rembourser par un admin.
+        // confirmation manuelle, par exemple) ou si elle a été annulée, cet argent est
+        // bien arrivé mais n'est pas appliqué à la course : il est signalé (isDuplicate)
+        // et à rembourser par un admin (panneau « À régler »).
         const applied = await tx.booking.updateMany({
-          where: { id: payment.bookingId, paymentStatus: { not: 'PAID' } },
+          where: { id: payment.bookingId, paymentStatus: { not: 'PAID' }, status: { not: 'CANCELLED' } },
           data: { paymentStatus: 'PAID', paymentMethod: result.method },
         });
         if (applied.count === 0) {
           await tx.payment.update({ where: { id: payment.id }, data: { isDuplicate: true } });
           this.logger.warn(
-            `Double paiement PayDunya : le paiement ${payment.id} (${payment.amountFcfa} FCFA) est arrivé alors que la course ${payment.bookingId} était déjà payée. À rembourser.`,
+            `Paiement PayDunya non appliqué : le paiement ${payment.id} (${payment.amountFcfa} FCFA) est arrivé alors que la course ${payment.bookingId} était déjà payée ou annulée. À rembourser.`,
           );
         }
       }
