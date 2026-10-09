@@ -13,6 +13,8 @@ import {
 import { Booking, BookingStatus, DepartureWaiver } from '@prisma/client';
 import { BookingsService } from './bookings.service';
 import { DepartureWaiversService } from './departure-waivers.service';
+import { DriverChangesService } from './driver-changes.service';
+import { ChangeDriverDto } from './dto/change-driver.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { AssignBookingDto } from './dto/assign-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
@@ -26,6 +28,7 @@ export class BookingsController {
   constructor(
     private readonly bookings: BookingsService,
     private readonly waivers: DepartureWaiversService,
+    private readonly driverChanges: DriverChangesService,
   ) {}
 
   @Post()
@@ -73,6 +76,20 @@ export class BookingsController {
     return this.bookings.updateStatus(id, dto.status, user, dto.reason);
   }
 
+  /**
+   * Change le chauffeur (et le véhicule) d'une course EN ROUTE ou EN COURS : panne, incident.
+   * Tout le personnel, motif obligatoire. Statut, paiement et prix de la course ne changent pas.
+   */
+  @Post(':id/driver-change')
+  @HttpCode(200)
+  changeDriver(
+    @Param('id') id: string,
+    @Body() dto: ChangeDriverDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<Booking> {
+    return this.driverChanges.change(id, dto, user);
+  }
+
   /** Autorise le départ d'une course non payée, avec motif (MANAGER, ADMIN). */
   @Post(':id/departure-waiver')
   @Roles(...MANAGER_ROLES)
@@ -99,7 +116,7 @@ export class BookingsController {
 
 @Module({
   imports: [PricingModule],
-  providers: [BookingsService, DepartureWaiversService],
+  providers: [BookingsService, DepartureWaiversService, DriverChangesService],
   controllers: [BookingsController],
   exports: [BookingsService],
 })

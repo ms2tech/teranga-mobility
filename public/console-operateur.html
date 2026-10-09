@@ -799,7 +799,7 @@
     // Historique : paiements et dérogations, du plus récent au plus ancien.
     const items = [...ps.map(p => ({ t: p.createdAt, html: histRow(p) })), ...waiversOf(b).map(x => ({ t: x.grantedAt, html: waiverRow(x) }))]
       .sort((a, c) => new Date(c.t) - new Date(a.t));
-    if (items.length) h += `<details class="hist"><summary>Historique (${items.length})</summary>${items.map(i => i.html).join('')}</details>`;
+    if (items.length) h += `<details class="hist" data-dk="pay"><summary>Historique (${items.length})</summary>${items.map(i => i.html).join('')}</details>`;
     return `<div class="pay">${h}<span class="paymsg" role="status"></span></div>`;
   }
 
@@ -813,6 +813,8 @@
                   : '<button class="stbtn go" disabled title="En attente de paiement, départ bloqué">En route</button>');
     }
     if (['ASSIGNED','EN_ROUTE','IN_PROGRESS'].includes(s)) out.push('<button class="stbtn" data-action="st-COMPLETED">Terminée</button>');
+    // Panne, incident : tout le personnel peut changer le chauffeur d'une course en route ou en cours.
+    if (['EN_ROUTE','IN_PROGRESS'].includes(s)) out.push('<button class="stbtn" data-action="driver-change">Changer de chauffeur…</button>');
     if (['ASSIGNED','EN_ROUTE'].includes(s)) out.push('<button class="stbtn" data-action="st-NO_SHOW">Client absent</button>');
     // Annuler une course PAYÉE crée un remboursement à faire : réservé aux responsables et admins.
     if (['PENDING','CONFIRMED','ASSIGNED','EN_ROUTE'].includes(s) && (!paid || isManager())) out.push('<button class="stbtn danger" data-action="st-CANCELLED">Annulée…</button>');
@@ -823,14 +825,15 @@
   function renderQueue(list){
       lastList = list;
       // Un historique ouvert reste ouvert quand la liste est redessinée.
-      const openIds = new Set([...document.querySelectorAll('#queue details[open]')].map(d => d.closest('.qcard') && d.closest('.qcard').dataset.id));
+      // (une carte peut avoir deux historiques : paiements « pay » et changements de chauffeur « drv »)
+      const openKeys = new Set([...document.querySelectorAll('#queue details[open][data-dk]')].map(d => d.closest('.qcard') && (d.closest('.qcard').dataset.id + '|' + d.dataset.dk)));
       const q=$('queue'); if(!list.length){ q.innerHTML='<div class="empty">Aucune course à venir.</div>'; return; }
       q.innerHTML=list.map(b=>{
         const now=b.isImmediate?'<span class="tag tag-now">Immédiat</span>':'';
         const need=b.needsWheelchairVehicle?'<span class="tag tag-need">PMR</span>':'';
         const paid=b.paymentStatus==='PAID'?'<span class="tag tag-paid">Payé</span>':'';
         let action='';
-        if(b.driver){ action=`<div class="assigned">Chauffeur : ${esc(b.driver.user?b.driver.user.fullName:'—')}</div>`; }
+        if(b.driver){ action=`<div class="assigned">Chauffeur : ${esc(b.driver.user?b.driver.user.fullName:'—')}${b.vehicle?` · ${esc(b.vehicle.registration)}`:''}</div>${driverChangesHtml(b)}`; }
         else if(b.status==='PENDING'||b.status==='CONFIRMED'){
           const opts=assignOptions(b.needsWheelchairVehicle);
           action = opts.length
@@ -848,7 +851,7 @@
           ${payBlock(b)}
         </div>`;
       }).join('');
-      q.querySelectorAll('.qcard').forEach(c => { if (openIds.has(c.dataset.id)) { const d = c.querySelector('details.hist'); if (d) d.open = true; } });
+      q.querySelectorAll('.qcard details[data-dk]').forEach(d => { if (openKeys.has(d.closest('.qcard').dataset.id + '|' + d.dataset.dk)) d.open = true; });
   }
 
   // Actions sur une course : affectation, lien de paiement, copie, vérification (délégation d'événements)
@@ -866,6 +869,7 @@
     if(act==='refund'){ openRefundDialog(btn.dataset.payment); return; }
     if(act==='waive'){ openWaiveDialog(id); return; }
     if(act==='unwaive'){ openUnwaiveDialog(id); return; }
+    if(act==='driver-change'){ openDriverChangeDialog(id); return; }
     if(act==='st-EN_ROUTE'){ await departNow(card, id); return; }
     if(act.startsWith('st-')){ openStatusDialog(id, act.slice(3)); return; }
 
@@ -1058,6 +1062,46 @@
       fields: [{ key:'reason', label:'Motif du retrait (obligatoire)', type:'textarea', required:true, minLength:10, maxLength:500, placeholder:'Ex. accordée par erreur, le client a finalement payé…' }],
       submitLabel: 'Retirer la dérogation', danger: true,
       onSubmit: async (v) => { await postJson(`/bookings/${encodeURIComponent(id)}/departure-waiver/revoke`, { reason: v.reason }); },
+    });
+  }
+
+  // ── Changement de chauffeur en route (tout le personnel) ───────────────────
+  // Le serveur applique les règles (course en route ou en cours, véhicule du chauffeur, véhicule adapté
+  // pour un fauteuil roulant). La course garde son statut, son paiement et son prix ; l'historique est conservé.
+  const driverChangesOf = (b) => Array.isArray(b.driverChanges) ? b.driverChanges : [];
+  const personLabel = (d, v) => `${d && d.user ? d.user.fullName : '—'}${v ? ` (${v.registration})` : ''}`;
+  function driverChangesHtml(b){
+    const cs = driverChangesOf(b); if (!cs.length) return '';
+    const rows = cs.map(c => `<div class="histrow"><b>${esc(fmtDT(c.changedAt))}</b> · course ${esc(STATUS_FR[c.bookingStatus] || c.bookingStatus)} · ${esc(personLabel(c.fromDriver, c.fromVehicle))} → <b>${esc(personLabel(c.toDriver, c.toVehicle))}</b><br>Motif : ${esc(c.reason)} · par ${esc(c.changedBy ? c.changedBy.fullName : '—')}</div>`).join('');
+    return `<details class="hist" data-dk="drv"><summary>Changements de chauffeur (${cs.length})</summary>${rows}</details>`;
+  }
+  // Chauffeurs et véhicules disponibles, sauf la paire actuelle ; une course en fauteuil roulant : véhicules adaptés seulement.
+  function driverOptions(b){
+    const o = [];
+    for (const d of drivers) for (const v of (d.vehicles || [])) {
+      if (b.needsWheelchairVehicle && !v.wheelchairAccessible) continue;
+      if (d.id === b.driverId && v.id === b.vehicleId) continue;
+      o.push({ value: d.id + '|' + v.id, label: `${d.user.fullName} · ${v.model || v.type} (${v.registration})${v.wheelchairAccessible ? ' · adapté PMR' : ''}` });
+    }
+    return o;
+  }
+  function openDriverChangeDialog(id){
+    const b = findBooking(id); if (!b) return;
+    const options = driverOptions(b), cur = personLabel(b.driver, b.vehicle);
+    openAction({
+      title: 'Changer de chauffeur', sub: `${b.reference} — ${b.client ? b.client.fullName : 'Passager'} · actuellement ${cur}`,
+      notice: (b.needsWheelchairVehicle ? 'Cette course exige un véhicule adapté au fauteuil roulant : seuls ces véhicules sont proposés. ' : '') +
+        (options.length ? 'La course garde son statut, son paiement et son prix. Le changement est enregistré avec votre nom, la date et le motif.'
+                        : 'Aucun autre chauffeur ni véhicule disponible : ajoutez-en via « + Flotte ».'),
+      fields: [
+        { key:'pair', label:'Nouveau chauffeur et véhicule', type:'select', required:true, options },
+        { key:'reason', label:'Motif (obligatoire)', type:'textarea', required:true, minLength:5, maxLength:500, placeholder:'Ex. panne du véhicule, malaise du chauffeur…' } ],
+      submitLabel: 'Changer de chauffeur',
+      onSubmit: async (v) => {
+        if (!v.pair) throw new Error('Aucun chauffeur disponible.');
+        const [driverId, vehicleId] = v.pair.split('|');
+        await postJson(`/bookings/${encodeURIComponent(id)}/driver-change`, { driverId, vehicleId, reason: v.reason });
+      },
     });
   }
 

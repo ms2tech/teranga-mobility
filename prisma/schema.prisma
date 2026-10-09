@@ -150,6 +150,7 @@ model User {
   waiversRevoked    DepartureWaiver[] @relation("WaiverRevokedBy")
   tariffVersionsCreated TariffVersion[] @relation("TariffVersionCreatedBy")
   routeChanges      RouteChange[] @relation("RouteChangedBy")
+  driverChanges     DriverChange[] @relation("DriverChangedBy")
 
   @@index([role])
 }
@@ -207,6 +208,8 @@ model Driver {
   vehicles Vehicle[]
   bookings Booking[]
   payouts  DriverPayout[]
+  changesFrom DriverChange[] @relation("DriverChangeFrom") // courses qu'il a quittées (panne, incident)
+  changesTo   DriverChange[] @relation("DriverChangeTo") // courses qu'il a reprises
 
   @@index([status])
 }
@@ -226,6 +229,8 @@ model Vehicle {
   updatedAt            DateTime    @updatedAt
 
   bookings Booking[]
+  changesFrom DriverChange[] @relation("DriverChangeFromVehicle")
+  changesTo   DriverChange[] @relation("DriverChangeToVehicle")
 }
 
 // ── Réseau & tarification ───────────────────────────────────────────────
@@ -410,6 +415,7 @@ model Booking {
 
   payments         Payment[]
   departureWaivers DepartureWaiver[]
+  driverChanges    DriverChange[]
   payout           DriverPayout?
 
   @@index([status])
@@ -437,6 +443,36 @@ model DepartureWaiver {
   revokedBy    User?     @relation("WaiverRevokedBy", fields: [revokedById], references: [id])
   revokedAt    DateTime?
   revokeReason String?
+
+  @@index([bookingId])
+}
+
+// Changement de chauffeur (et / ou de véhicule) sur une course EN ROUTE ou EN COURS : panne,
+// incident… Tout le personnel peut le faire, avec un motif obligatoire. La ligne n'est JAMAIS
+// modifiée ni supprimée. La course garde son statut, son paiement et son prix (prix figé).
+// Le partage de la part chauffeur (driverPayoutFcfa) entre l'ancien et le nouveau chauffeur
+// n'est PAS décidé : il le sera au lot des reversements (DriverPayout). Ici, seul l'historique.
+model DriverChange {
+  id            String        @id @default(cuid())
+  bookingId     String
+  booking       Booking       @relation(fields: [bookingId], references: [id])
+  bookingStatus BookingStatus // statut de la course à ce moment-là (EN_ROUTE ou IN_PROGRESS)
+
+  // Avant : vides seulement si la course n'avait pas de chauffeur (donnée ancienne)
+  fromDriverId  String?
+  fromDriver    Driver?  @relation("DriverChangeFrom", fields: [fromDriverId], references: [id])
+  fromVehicleId String?
+  fromVehicle   Vehicle? @relation("DriverChangeFromVehicle", fields: [fromVehicleId], references: [id])
+  // Après
+  toDriverId    String
+  toDriver      Driver  @relation("DriverChangeTo", fields: [toDriverId], references: [id])
+  toVehicleId   String
+  toVehicle     Vehicle @relation("DriverChangeToVehicle", fields: [toVehicleId], references: [id])
+
+  reason      String
+  changedById String
+  changedBy   User     @relation("DriverChangedBy", fields: [changedById], references: [id])
+  changedAt   DateTime @default(now())
 
   @@index([bookingId])
 }

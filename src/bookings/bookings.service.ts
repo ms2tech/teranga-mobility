@@ -12,7 +12,9 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { generateBookingReference } from '../common/reference';
 import { coded } from '../common/coded';
 import { PAYMENT_PEOPLE } from '../payments/payment.include';
+import { STATUS_LABEL } from './booking-status';
 import { BEFORE_DEPARTURE, WAIVER_PEOPLE } from './departure-waivers.service';
+import { DRIVER_CHANGE_PEOPLE } from './driver-changes.service';
 
 const ACTIVE_STATUSES: BookingStatus[] = [
   'PENDING', 'CONFIRMED', 'ASSIGNED', 'EN_ROUTE', 'IN_PROGRESS',
@@ -30,11 +32,6 @@ const TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
   COMPLETED: [],
   CANCELLED: [],
   NO_SHOW: [],
-};
-
-const STATUS_LABEL: Record<BookingStatus, string> = {
-  PENDING: 'en attente', CONFIRMED: 'confirmée', ASSIGNED: 'affectée', EN_ROUTE: 'en route',
-  IN_PROGRESS: 'en cours', COMPLETED: 'terminée', CANCELLED: 'annulée', NO_SHOW: 'client absent',
 };
 
 // Une course non payée ne part pas (carburant et temps) : le chauffeur peut être
@@ -183,7 +180,10 @@ export class BookingsService {
   findOne(id: string): Promise<Booking | null> {
     return this.prisma.booking.findUnique({
       where: { id },
-      include: { client: true, route: true, driver: true, vehicle: true },
+      include: {
+        client: true, route: true, driver: true, vehicle: true,
+        driverChanges: { orderBy: { changedAt: 'desc' }, include: DRIVER_CHANGE_PEOPLE },
+      },
     });
   }
 
@@ -196,11 +196,14 @@ export class BookingsService {
         client: true,
         route: true,
         driver: { include: { user: true } },
+        vehicle: { select: { id: true, registration: true, model: true, type: true } },
         // Tous les paiements de la course (la console en tire le lien en attente,
         // le paiement reçu, les doubles paiements et l'historique)
         payments: { orderBy: { createdAt: 'desc' }, include: PAYMENT_PEOPLE },
         // Dérogations de départ (active ou retirées) : bandeau « départ autorisé sans paiement »
         departureWaivers: { orderBy: { grantedAt: 'desc' }, include: WAIVER_PEOPLE },
+        // Changements de chauffeur en cours de route (panne, incident) : historique de la carte
+        driverChanges: { orderBy: { changedAt: 'desc' }, include: DRIVER_CHANGE_PEOPLE },
       },
     });
   }

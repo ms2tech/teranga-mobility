@@ -77,6 +77,10 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   obligatoire), **Terminée**, **Client absent**, **Annulée…** (motif obligatoire).
   Seuls les boutons permis par l'état de la course sont proposés ; Terminée,
   Annulée et Client absent sont définitifs.
+- **Changer de chauffeur…** (tout le personnel) sur une course **en route** ou **en cours** :
+  panne, incident. Choix du nouveau chauffeur et de son véhicule, motif obligatoire.
+  La course garde son statut, son paiement et son prix ; l'historique des changements
+  s'affiche sur la carte de la course.
 - **Paiement** : « Lien de paiement » par course (affichage, copie, envoi par
   WhatsApp au proche ou, à défaut, au passager), badge **Payé**, et
   « Vérifier le paiement » si la notification n'est pas arrivée.
@@ -111,7 +115,8 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
 ## Connexion (authentification)
 
 - **Qui** : le personnel, par e-mail + mot de passe, avec trois rôles :
-  - `OPERATOR` : réservations, affectation, liens de paiement, vérification d'un paiement ;
+  - `OPERATOR` : réservations, affectation, changement de chauffeur en route, liens de
+    paiement, vérification d'un paiement ;
   - `MANAGER` (responsable des opérations) : tout l'OPERATOR, plus la confirmation
     manuelle d'un paiement, la dérogation de départ, l'annulation d'une course déjà
     payée et le panneau « À régler » ;
@@ -251,7 +256,8 @@ de transitions côté serveur ; une transition interdite répond `409 INVALID_TR
 | autres        | aucune (`COMPLETED`, `CANCELLED`, `NO_SHOW` sont définitifs) |
 
 - `ASSIGNED` ne s'obtient que par l'affectation (`PATCH /api/bookings/:id/assign`), qui
-  est refusée dès que la course est partie ou terminée (`409`).
+  est refusée dès que la course est partie ou terminée (`409`). Pour une course déjà
+  partie, le chauffeur change par `POST /api/bookings/:id/driver-change` (voir plus bas).
 - `EN_ROUTE` et `IN_PROGRESS` exigent un chauffeur affecté (`400 DRIVER_REQUIRED`).
 - **Annulation** : motif obligatoire (5 caractères minimum, `400 REASON_REQUIRED`),
   conservé avec l'auteur et la date. Une course **non payée** peut être annulée par
@@ -263,6 +269,33 @@ de transitions côté serveur ; une transition interdite répond `409 INVALID_TR
   liens PayDunya en attente sont abandonnés ; un lien payé après l'annulation est
   enregistré `PAID` avec `isDuplicate`, à rembourser aussi.
 - **Client absent** (`NO_SHOW`) : le paiement est conservé, sans frais pour l'instant.
+
+### Changement de chauffeur en route
+
+`POST /api/bookings/:id/driver-change` (`driverId`, `vehicleId`, `reason`) : **tout le
+personnel**, sur une course `EN_ROUTE` ou `IN_PROGRESS` seulement (avant le départ,
+l'affectation suffit ; une course terminée, annulée ou « client absent » ne change plus :
+`409 DRIVER_CHANGE_NOT_ALLOWED`).
+
+- **Motif obligatoire** (5 caractères minimum : « panne » suffit en pleine urgence).
+- **La course garde son statut, son paiement et son prix** (règle du prix figé) : seuls le
+  chauffeur et le véhicule changent. Aucun champ de statut, de prix ou de paiement n'est
+  accepté.
+- **Véhicule adapté** : si la course exige un véhicule adapté au fauteuil roulant, le nouveau
+  véhicule doit l'être aussi (`400 WHEELCHAIR_VEHICLE_REQUIRED`).
+- Le véhicule doit appartenir au nouveau chauffeur et être actif ; un **autre** chauffeur doit
+  être actif. Le **même** chauffeur peut changer de véhicule (panne du véhicule), même s'il
+  n'est plus « actif ». Rien à changer : `400 NO_CHANGE`.
+- **Historique** (table `DriverChange`, jamais modifiée ni supprimée) : ancien et nouveau
+  chauffeur, ancien et nouveau véhicule, motif, auteur, date, et **statut de la course à ce
+  moment-là**. Fourni avec la course (`GET /api/bookings/upcoming` et `/:id`, noms et
+  immatriculations seulement) et affiché dans la console.
+- **Deux changements en même temps** : la mise à jour est conditionnelle sur l'état lu ; une
+  course terminée entre-temps n'est pas modifiée (`409 COURSE_CHANGED`), et chaque succès
+  laisse exactement une ligne d'historique.
+- **Part du chauffeur** : le partage de `driverPayoutFcfa` entre l'ancien et le nouveau
+  chauffeur **n'est pas décidé** ; il le sera au lot des reversements. Ce lot n'enregistre
+  que l'historique.
 
 ---
 
@@ -395,6 +428,7 @@ autoroute, majoration PMR, majoration VIP, accompagnement, commission.
 | `GET`   | `/api/bookings/to-collect`                | Courses à encaisser (**MANAGER, ADMIN**)     |
 | `PATCH` | `/api/bookings/:id/assign`                | Affecter chauffeur + véhicule (avant le départ) |
 | `PATCH` | `/api/bookings/:id/status`                | Changer le statut (transitions contrôlées ; `EN_ROUTE` refusé si non payée sans dérogation ; motif pour annuler) |
+| `POST`  | `/api/bookings/:id/driver-change`         | Changer le chauffeur et le véhicule d'une course en route ou en cours (personnel, motif) |
 | `POST`  | `/api/bookings/:id/departure-waiver`      | Autoriser le départ d'une course non payée (**MANAGER, ADMIN**, motif) |
 | `POST`  | `/api/bookings/:id/departure-waiver/revoke` | Retirer la dérogation (**MANAGER, ADMIN**, motif) |
 | `GET`   | `/api/drivers`                            | Chauffeurs (`?assignable=true` : affectables)|
@@ -451,7 +485,8 @@ src/
   tariffs/                 barème en base : versions, bornes, aperçu, historique (ADMIN)
   maps/                    Google Maps : géocodage, itinéraire, péage
   routes/                  corridors à prix fixe : liste, création, prix, désactivation, historique (ADMIN)
-  bookings/                réservations (service + controller + DTO), dérogations de départ
+  bookings/                réservations (service + controller + DTO), dérogations de départ,
+                           changements de chauffeur en route
   drivers/                 chauffeurs (création, liste, statut)
   vehicles/                véhicules
   payments/                paiement : interface PaymentProvider, fournisseur PayDunya, IPN,
@@ -477,13 +512,15 @@ prisma/
       aperçu avant / après, prix déjà calculés figés, garde-fou `expectedTotalFcfa`)
 - [x] Corridors à prix fixe gérés par un admin (création ville ↔ ville comprise, prix,
       désactivation, motif, historique ; le seed ne les écrase plus)
+- [x] Changement de chauffeur en route (panne, incident), avec motif et historique
 - [ ] Frais d'annulation (aujourd'hui : remboursement intégral)
 - [ ] Site et domaine, passage de PayDunya en mode live (URL IPN du vrai serveur)
 
 **Fondation**
 - [x] Module chauffeurs & véhicules (création, liste, statut)
 - [x] Intégration paiement PayDunya en mode test : lien, IPN, vérification manuelle
-- [ ] Reversements chauffeurs via **Wave Bulk Pay** (table `DriverPayout`)
+- [ ] Reversements chauffeurs via **Wave Bulk Pay** (table `DriverPayout`), dont le partage de
+      la part d'une course dont le chauffeur a changé en route (à décider)
 - [ ] Notifications SMS de confirmation (clients sans smartphone)
 
 **Ensuite**
