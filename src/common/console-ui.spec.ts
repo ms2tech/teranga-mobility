@@ -167,5 +167,40 @@ test('formulaire : une course planifiée ne peut pas être datée dans le passé
   assert.ok(/earliestSchedule\(\)\.getTime\(\)\)\{[^}]*déjà passées/.test(script), "contrôle à l'envoi manquant");
 });
 
+// ── Défilement : deux colonnes indépendantes sur écran large, page normale sur écran étroit ──
+const WIDE_QUERY = '(min-width:1001px) and (min-height:520px)';
+const wideBlock = (): string => /@media \(min-width:1001px\) and \(min-height:520px\) \{[\s\S]*?\n  \}/.exec(css)?.[0] ?? '';
+
+test('écran large : la page ne défile pas, chaque colonne défile seule ; hors écran large, défilement normal de la page', () => {
+  const wide = wideBlock();
+  assert.ok(wide, 'bloc @media écran large introuvable');
+  assert.ok(/body \{[^}]*height:100dvh[^}]*overflow:hidden/.test(wide), 'la page doit être figée à la hauteur de la fenêtre');
+  assert.ok(/\.form-scroll \{[^}]*overflow-y:auto/.test(wide) && /\.queue-scroll \{[^}]*overflow-y:auto/.test(wide), 'zones défilantes manquantes');
+  assert.ok(/\.wrap \{[^}]*min-height:0/.test(wide) && /\.wrap > \.panel \{[^}]*min-height:0/.test(wide), 'min-height:0 manquant : les colonnes déborderaient au lieu de défiler');
+  // Hors du bloc (colonnes empilées ≤ 1000 px, fenêtre très basse) : aucun défilement interne
+  const rest = css.replace(wide, '');
+  assert.ok(!/(^|\n)\s*(body|\.form-scroll|\.queue-scroll|\.form-foot|\.form-body)\s*\{[^}]*overflow/.test(rest), 'un défilement interne est actif hors écran large');
+});
+test('balisage : formulaire = zone défilante + pied (récapitulatif et bouton) ; liste = en-tête fixe + zone défilante', () => {
+  const at = (s: string): number => markup.indexOf(s);
+  const [scroll, foot, quote, submit, msg] = ['class="form-scroll"', 'class="form-foot"', 'id="quote"', 'id="submit"', 'id="formmsg"'].map(at);
+  assert.ok(scroll > 0 && foot > scroll, 'zone défilante puis pied');
+  assert.ok(at('id="clientName"') > scroll && at('id="clientName"') < foot && at('id="purpose"') < foot && at('id="scheduledAt"') < foot, 'les champs doivent être dans la zone défilante');
+  assert.ok(quote > foot && submit > foot && msg > foot, 'récapitulatif, bouton et message doivent être dans le pied (toujours visibles)');
+  const qHead = at('class="panel-head queue-head"'), qScroll = at('class="queue-scroll"');
+  assert.ok(qHead > 0 && qScroll > qHead, "l'en-tête « Courses à venir » doit rester hors de la zone défilante");
+  assert.ok(at('id="refundPanel"') > qScroll && at('id="fleetPanel"') > qScroll && at('id="queue"') > qScroll, 'panneaux et liste dans la zone défilante');
+  assert.ok(/class="form-scroll"[^>]*role="region"[^>]*aria-label="[^"]+"[^>]*tabindex="0"/.test(markup) && /class="queue-scroll"[^>]*role="region"[^>]*aria-label="[^"]+"[^>]*tabindex="0"/.test(markup), 'zones défilantes sans nom ni accès clavier');
+});
+test('récapitulatif : total, répartition et bouton toujours visibles ; détail du calcul repliable (replié d\'office sur fenêtre basse)', () => {
+  const rq = fn('renderQuote');
+  assert.ok(/<details class="qdetail" id="quoteDetail"/.test(rq) && /<summary>Détail du calcul<\/summary>/.test(rq), 'détail repliable manquant');
+  const [iEnd, iTotal, iSplit] = [rq.indexOf('</details>'), rq.indexOf('class="qtotal"'), rq.indexOf('class="qsplit"')];
+  assert.ok(iEnd > 0 && iTotal > iEnd && iSplit > iTotal, 'le total et la répartition doivent être HORS du détail repliable');
+  assert.ok(script.includes(`matchMedia('${WIDE_QUERY}')`), 'la requête JavaScript doit être la même que celle du CSS');
+  assert.ok(/quoteDetailOpen = \(\) => quoteDetailPref !== null \? quoteDetailPref : \(!WIDE_LAYOUT\.matches \|\| window\.innerHeight >= 900\)/.test(script), "règle d'ouverture par défaut");
+  assert.ok(/closest\('summary'\)[\s\S]{0,160}quoteDetailPref=d\.open/.test(script), "le choix de l'opérateur n'est pas mémorisé");
+});
+
 console.log(`\n${passed}/${passed + failed} contrôles réussis.`);
 process.exit(failed === 0 ? 0 : 1);

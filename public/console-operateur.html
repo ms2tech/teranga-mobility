@@ -79,6 +79,12 @@
   .qline { display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; font-size:14px; }
   .qline .lbl { color:var(--muted); }
   .qline .amt { font-variant-numeric:tabular-nums; font-weight:600; }
+  /* Détail du calcul : repliable (le total reste toujours visible dessous) */
+  .qdetail > summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--muted); padding:2px 0 6px; user-select:none; }
+  .qdetail > summary::-webkit-details-marker { display:none; }
+  .qdetail > summary::before { content:'▸'; width:10px; font-size:10px; color:var(--faint); }
+  .qdetail[open] > summary::before { content:'▾'; }
+  .qdetail > summary:focus-visible { outline:2px solid var(--primary); outline-offset:2px; border-radius:4px; }
   .qtotal { margin-top:10px; padding-top:14px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:baseline; }
   .qtotal .lbl { font-weight:700; font-size:14px; }
   .qtotal .amt { font-size:28px; font-weight:800; letter-spacing:-.02em; color:var(--accent); font-variant-numeric:tabular-nums; }
@@ -95,6 +101,35 @@
   .formmsg { font-size:13.5px; font-weight:600; }
   .formmsg.ok { color:var(--primary); }
   .formmsg.err { color:#c0392b; }
+
+  /* Écran large : la page ne défile plus. La barre du haut reste en haut ; dessous, les deux colonnes occupent toute la
+     hauteur restante et chacune défile seule (formulaire à gauche, liste des courses à droite). En bas du formulaire,
+     le récapitulatif tarifaire et « Créer la réservation » (.form-foot) restent toujours visibles. Colonnes empilées
+     (≤ 1000 px) ou fenêtre très basse : défilement normal de la page, comme avant. */
+  @media (min-width:1001px) and (min-height:520px) {
+    html, body { height:100%; }
+    body { height:100vh; height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
+    .topbar { flex:none; }
+    .wrap { flex:1 1 auto; min-height:0; width:100%; grid-template-rows:minmax(0,1fr); align-items:stretch; }
+    .wrap > .panel { display:flex; flex-direction:column; min-height:0; }
+    .panel-head { flex:none; }
+    .panel-body.form-body { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; padding:0; }
+    .form-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:20px; }
+    .form-foot { flex:none; padding:12px 20px 14px; border-top:1px solid var(--line); background:var(--card); box-shadow:0 -8px 16px -12px rgba(16,32,31,.28); }
+    /* Pied du formulaire compact : le récapitulatif ne mange pas la place des champs (détail repliable, et borné à
+       25 % de la hauteur s'il est déplié) */
+    .form-foot .quote { margin-top:0; }
+    .form-foot .quote-head { padding:8px 14px; }
+    .form-foot .quote-body { padding:8px 14px 10px; }
+    .form-foot .qdetail > summary { padding:0 0 4px; }
+    .form-foot .qlines { max-height:25vh; overflow-y:auto; }
+    .form-foot .qline { padding:2px 0; font-size:13px; }
+    .form-foot .qtotal { margin-top:6px; padding-top:8px; }
+    .form-foot .qtotal .amt { font-size:24px; }
+    .form-foot .qsplit { margin-top:8px; padding:6px 10px; }
+    .form-foot .actions { margin-top:12px; }
+    .queue-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+  }
 
   /* En-tête de « Courses à venir » : le titre et « Mis à jour à… » (dessous) ne se coupent jamais ; les boutons
      passent sur une ligne à part si la place manque, et reviennent à la ligne entre eux plutôt que de dépasser. */
@@ -302,7 +337,10 @@
   <main class="wrap">
     <section class="panel" aria-labelledby="ttl-new">
       <div class="panel-head"><h2 id="ttl-new">Nouvelle réservation</h2><span class="hint">Saisie pendant l'appel</span></div>
-      <div class="panel-body">
+      <!-- Écran large : le formulaire défile dans .form-scroll ; le récapitulatif tarifaire et « Créer la réservation »
+           (.form-foot) restent toujours visibles en bas. Écran étroit : tout défile avec la page. -->
+      <div class="panel-body form-body">
+      <div class="form-scroll" role="region" aria-label="Saisie de la réservation" tabindex="0">
 
         <div class="section">
           <p class="section-label"><span class="num">1</span> Passager</p>
@@ -391,6 +429,9 @@
           </div>
         </div>
 
+      </div>
+
+      <div class="form-foot">
         <div class="quote" id="quote">
           <div class="quote-head"><span>Récapitulatif tarifaire</span><span class="quote-mode hidden" id="quoteMode"></span></div>
           <div class="quote-body" id="quoteBody"><p class="quote-empty">Renseigne le trajet et le service pour voir le tarif.</p></div>
@@ -401,6 +442,7 @@
           <span class="formmsg" id="formmsg" role="status"></span>
         </div>
       </div>
+      </div>
     </section>
 
     <section class="panel" aria-labelledby="ttl-queue">
@@ -408,6 +450,9 @@
         <!-- Boutons qui ouvrent / ferment un panneau : aria-pressed, fond plein quand le panneau est ouvert,
              et l'icône passe de « ouvrir » à ✕ (fermer). Voir setPanel() dans le script. -->
         <div class="queue-tools"><button class="iconbtn tgl hidden" id="refundToggle" type="button" aria-pressed="false" aria-controls="refundPanel" data-label="À régler" data-ico-closed="▾" title="Ouvrir le panneau « À régler »"><span class="tgl-ico" aria-hidden="true">▾</span><span>À régler</span><span class="countbadge hidden" id="refundCount">0</span></button><button class="iconbtn tgl" id="fleetToggle" type="button" aria-pressed="false" aria-controls="fleetPanel" data-label="Flotte" data-ico-closed="+" title="Ouvrir le panneau « Flotte »"><span class="tgl-ico" aria-hidden="true">+</span><span>Flotte</span></button><button class="iconbtn" id="refresh">Actualiser</button></div></div>
+      <!-- Écran large : l'en-tête reste en haut, et les panneaux ouverts avec la liste des courses défilent dans
+           .queue-scroll, indépendamment du formulaire. -->
+      <div class="queue-scroll" role="region" aria-label="Liste des courses" tabindex="0">
       <div class="fleet hidden" id="refundPanel" role="region" aria-labelledby="refundTitle">
         <div class="phead"><h3 class="section-label" id="refundTitle"><span class="num">!</span> À régler : à encaisser et à rembourser</h3><button class="closebtn" type="button" data-close-panel="refundPanel">Fermer</button></div>
         <div id="refundList"></div>
@@ -426,6 +471,7 @@
         <div class="fleet-actions"><button class="btn" id="fleetSave" style="padding:10px 18px;">Enregistrer</button><span class="formmsg" id="fleetMsg"></span></div>
       </div>
       <div id="queue" class="queue"><div class="empty">Chargement…</div></div>
+      </div>
     </section>
   </main>
 
@@ -744,11 +790,21 @@
   let shownTotal=null;
   function scheduleQuote(){ clearTimeout(qt); qt=setTimeout(refreshQuote,220); }
   function emptyQuote(t){ shownTotal=null; $('quoteBody').innerHTML=`<p class="quote-empty">${esc(t)}</p>`; $('quoteMode').classList.add('hidden'); }
+  // Récapitulatif : le total, la répartition commission / chauffeur et le bouton restent toujours visibles (pied du
+  // formulaire sur écran large). Le DÉTAIL du calcul est repliable : déplié d'office si la fenêtre est haute (ou si la
+  // page défile normalement), replié sur une fenêtre basse pour ne pas écraser les champs. Le choix de l'opérateur
+  // (clic sur « Détail du calcul ») est ensuite conservé d'un devis à l'autre.
+  const WIDE_LAYOUT = window.matchMedia('(min-width:1001px) and (min-height:520px)');
+  let quoteDetailPref = null;   // null = automatique
+  const quoteDetailOpen = () => quoteDetailPref !== null ? quoteDetailPref : (!WIDE_LAYOUT.matches || window.innerHeight >= 900);
+  $('quoteBody').addEventListener('click',(e)=>{ if(!e.target.closest('summary')) return;
+    setTimeout(()=>{ const d=$('quoteDetail'); if(d) quoteDetailPref=d.open; },0); });
   function renderQuote(q){
     shownTotal=q.totalPriceFcfa;
     const m=$('quoteMode'); m.classList.remove('hidden'); m.textContent=q.pricingMode==='FLAT'?'Prix fixe':'Au compteur';
     const body=$('quoteBody');
-    body.innerHTML = q.breakdown.map(l=>`<div class="qline"><span class="lbl">${esc(l.label)}</span><span class="amt">${esc(money(l.amountFcfa))}</span></div>`).join('')
+    const lines=q.breakdown.map(l=>`<div class="qline"><span class="lbl">${esc(l.label)}</span><span class="amt">${esc(money(l.amountFcfa))}</span></div>`).join('');
+    body.innerHTML = `<details class="qdetail" id="quoteDetail"${quoteDetailOpen()?' open':''}><summary>Détail du calcul</summary><div class="qlines">${lines}</div></details>`
       +`<div class="qtotal"><span class="lbl">Total à payer</span><span class="amt">${esc(fmt.format(q.totalPriceFcfa))}<small>FCFA</small></span></div>`
       +`<div class="qsplit"><span>Commission ${esc(money(q.commissionFcfa))}</span><span>Chauffeur ${esc(money(q.driverPayoutFcfa))}</span></div>`;
     body.classList.remove('updating'); void body.offsetWidth; body.classList.add('updating');

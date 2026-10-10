@@ -53,7 +53,7 @@ Tests conservés, sans base de données ni serveur (quelques secondes) :
 npm test                  # tarification + données sensibles + interface
 npm run test:pricing      # moteur de tarification (12 cas)
 npm run test:sensitive    # aucune réponse ne doit contenir passwordHash (voir « Données sensibles »)
-npm run test:console      # règles d'interface de la console (20 contrôles, voir « Console opérateur »)
+npm run test:console      # règles d'interface de la console (23 contrôles, voir « Console opérateur »)
 ```
 
 > Note : `prisma generate` télécharge un moteur natif depuis
@@ -80,6 +80,17 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   (« À régler », « + Flotte », « Actualiser ») à droite, qui passent sur une ligne à part quand
   la place manque, sans jamais déborder. **Un seul panneau ouvert à la fois** parmi « À régler »
   et « Flotte » : ouvrir l'un ferme l'autre.
+- **Défilement** : sur écran large (au moins 1001 px de large et 520 px de haut), **la page ne
+  défile plus** : sous la barre du haut, les deux colonnes occupent toute la hauteur et **chacune
+  défile seule** (le formulaire à gauche, la liste des courses à droite ; l'en-tête « Courses à
+  venir » reste en haut, les panneaux « À régler » et « Flotte » défilent avec la liste, et
+  « Actualiser » ne remet pas la liste en haut). **Le pied du formulaire reste toujours visible** :
+  le récapitulatif tarifaire (total, répartition commission / chauffeur) et « Créer la
+  réservation », avec leur message d'erreur ou de succès. Le **détail du calcul** y est repliable :
+  déplié d'office si la fenêtre fait au moins 900 px de haut, replié sinon pour laisser la place
+  aux champs ; le choix de l'opérateur est ensuite conservé d'un devis à l'autre. Sur écran étroit
+  (colonnes empilées, ≤ 1000 px) ou fenêtre très basse (< 520 px), rien ne change : la page défile
+  normalement, le détail est déplié.
 - **Nouvelle réservation** : passager, trajet libre (prix calculé depuis les deux
   adresses via Google Maps, péage compris) ou prix fixe, horaire, accessibilité.
   Le **motif du déplacement** n'a pas de valeur par défaut : le choix est obligatoire.
