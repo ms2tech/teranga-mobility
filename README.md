@@ -99,7 +99,9 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   Seuls les boutons permis par l'état de la course sont proposés ; Terminée, Annulée et
   Client absent sont définitifs. **« Terminer la course » n'apparaît qu'une fois la course
   partie** (en route ou en cours) : terminer une course jamais partie n'a pas de sens au
-  quotidien. Le serveur, lui, accepte toujours la transition `ASSIGNED → COMPLETED`.
+  quotidien, et cela contournerait le blocage du départ sans paiement. Le **serveur** le refuse
+  aussi : `ASSIGNED → COMPLETED` répond `409 INVALID_TRANSITION` (même pour un admin, même payée,
+  même avec une dérogation) ; une course se termine après `EN_ROUTE` ou `IN_PROGRESS`.
   **Une seule action principale** est mise en avant selon l'état (contour marqué ou fond plein) :
   « Affecter un chauffeur » pour une course à affecter, « Créer le lien de paiement » pour une
   course affectée non payée, « Passer en route » quand elle est payée, « Terminer la course »
@@ -290,8 +292,9 @@ d'IPN simultanés.
 
 **Départ bloqué** : `PATCH /api/bookings/:id/status` refuse `EN_ROUTE` (et
 `IN_PROGRESS` depuis un état d'avant le départ) tant que la course n'est pas payée,
-avec `409` et le code `PAYMENT_REQUIRED`, **sauf dérogation active**. `COMPLETED`,
-`NO_SHOW` et `CANCELLED` ne sont jamais bloqués : ils enregistrent ce qui s'est passé.
+avec `409` et le code `PAYMENT_REQUIRED`, **sauf dérogation active**. `NO_SHOW` et
+`CANCELLED` ne sont jamais bloqués : ils enregistrent ce qui s'est passé. `COMPLETED`
+n'est atteignable qu'après le départ (`EN_ROUTE` ou `IN_PROGRESS`), donc après ce contrôle.
 
 ### Dérogation de départ
 
@@ -317,7 +320,7 @@ de transitions côté serveur ; une transition interdite répond `409 INVALID_TR
 |---------------|------------------------------------------------------|
 | `PENDING`     | `CONFIRMED`, `CANCELLED`                             |
 | `CONFIRMED`   | `CANCELLED`                                          |
-| `ASSIGNED`    | `EN_ROUTE`, `IN_PROGRESS`, `COMPLETED`, `NO_SHOW`, `CANCELLED` |
+| `ASSIGNED`    | `EN_ROUTE`, `IN_PROGRESS`, `NO_SHOW`, `CANCELLED`    |
 | `EN_ROUTE`    | `IN_PROGRESS`, `COMPLETED`, `NO_SHOW`, `CANCELLED`   |
 | `IN_PROGRESS` | `COMPLETED`                                          |
 | autres        | aucune (`COMPLETED`, `CANCELLED`, `NO_SHOW` sont définitifs) |
@@ -325,6 +328,10 @@ de transitions côté serveur ; une transition interdite répond `409 INVALID_TR
 - `ASSIGNED` ne s'obtient que par l'affectation (`PATCH /api/bookings/:id/assign`), qui
   est refusée dès que la course est partie ou terminée (`409`). Pour une course déjà
   partie, le chauffeur change par `POST /api/bookings/:id/driver-change` (voir plus bas).
+- **Une course ne se termine qu'après être partie** : `ASSIGNED → COMPLETED` est refusé
+  (`409 INVALID_TRANSITION`, avec un message qui dit de passer d'abord « en route » ou d'annuler),
+  même pour un admin, même si la course est payée ou sous dérogation. Sinon, terminer une course
+  jamais partie contournerait le blocage du départ sans paiement.
 - `EN_ROUTE` et `IN_PROGRESS` exigent un chauffeur affecté (`400 DRIVER_REQUIRED`).
 - **Annulation** : motif obligatoire (5 caractères minimum, `400 REASON_REQUIRED`),
   conservé avec l'auteur et la date. Une course **non payée** peut être annulée par

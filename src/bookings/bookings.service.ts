@@ -25,10 +25,12 @@ const ACTIVE_STATUSES: BookingStatus[] = [
 // Transitions permises par PATCH /bookings/:id/status. ASSIGNED ne s'obtient que par
 // l'affectation (PATCH /bookings/:id/assign). COMPLETED, CANCELLED et NO_SHOW sont des
 // états finaux : pas de réouverture, on crée une nouvelle réservation.
+// Une course ne se termine qu'après être partie : pas de ASSIGNED -> COMPLETED (terminer une course jamais
+// partie contournerait le blocage du départ sans paiement).
 const TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
   PENDING: ['CONFIRMED', 'CANCELLED'],
   CONFIRMED: ['CANCELLED'],
-  ASSIGNED: ['EN_ROUTE', 'IN_PROGRESS', 'COMPLETED', 'NO_SHOW', 'CANCELLED'],
+  ASSIGNED: ['EN_ROUTE', 'IN_PROGRESS', 'NO_SHOW', 'CANCELLED'],
   EN_ROUTE: ['IN_PROGRESS', 'COMPLETED', 'NO_SHOW', 'CANCELLED'],
   IN_PROGRESS: ['COMPLETED'],
   COMPLETED: [],
@@ -39,8 +41,9 @@ const TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
 // Une course non payée ne part pas (carburant et temps) : le chauffeur peut être
 // affecté à l'avance, mais le départ (EN_ROUTE, ou IN_PROGRESS depuis un état d'avant
 // le départ) exige un chauffeur affecté ET une course payée OU une dérogation de départ
-// active (MANAGER, ADMIN). COMPLETED, NO_SHOW et CANCELLED enregistrent ce qui s'est
-// passé et ne sont jamais bloqués.
+// active (MANAGER, ADMIN). NO_SHOW et CANCELLED enregistrent ce qui s'est passé et ne sont
+// jamais bloqués ; COMPLETED n'est atteignable qu'après le départ (EN_ROUTE ou IN_PROGRESS), donc
+// après ce contrôle.
 const DEPARTURE_STATUSES: BookingStatus[] = ['EN_ROUTE', 'IN_PROGRESS'];
 
 const CANCEL_REASON_MIN = 5;
@@ -281,8 +284,11 @@ export class BookingsService {
     if (!booking) throw new NotFoundException(`Réservation introuvable: ${id}`);
 
     if (!TRANSITIONS[booking.status].includes(status)) {
+      const hint = status === 'COMPLETED' && BEFORE_DEPARTURE.includes(booking.status)
+        ? ' Une course qui n\'est pas partie ne se termine pas : la passer d\'abord « en route » (paiement reçu ou départ autorisé), ou l\'annuler.'
+        : '';
       throw coded(409, 'INVALID_TRANSITION',
-        `Transition impossible : la course est ${STATUS_LABEL[booking.status]}, elle ne peut pas passer à « ${STATUS_LABEL[status]} ».`);
+        `Transition impossible : la course est ${STATUS_LABEL[booking.status]}, elle ne peut pas passer à « ${STATUS_LABEL[status]} ».${hint}`);
     }
 
     const motif = reason?.trim();
