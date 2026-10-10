@@ -120,13 +120,15 @@
   .queue { display:flex; flex-direction:column; container-type:inline-size; container-name:queue; }
   .qcard { padding:14px 20px; border-bottom:1px solid var(--line-soft); }
   /* Colonne des courses assez large (grand écran) : deux colonnes par carte, la course et ses actions à gauche,
-     le paiement à droite ; le lien « Annuler la course… » reste en bas, sur toute la largeur. */
+     le paiement à droite. */
   @container queue (min-width: 900px) {
     .qcard { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); column-gap:28px; align-items:start; }
     .qcard .qside .pay { margin-top:0; }
-    .qcard .qcard-foot { grid-column:1 / -1; }
   }
   .qcard:last-child { border-bottom:none; }
+  /* Course planifiée dont l'heure est dépassée sans être partie : trait rouge à gauche + pastille « En retard » */
+  .qcard.late { box-shadow:inset 4px 0 0 #b3261e; background:#fffafa; }
+  .tag-late { background:#b3261e; color:#fff; }
   .qcard-top { display:flex; align-items:center; gap:8px; margin-bottom:5px; flex-wrap:wrap; }
   .ref { font-weight:800; font-size:13px; letter-spacing:.02em; color:var(--primary-dark); }
   .badge { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:3px 8px; border-radius:999px; margin-left:auto; }
@@ -151,8 +153,8 @@
   .assignbtn.primary:hover { background:var(--primary-tint); }
   .assignbtn.tgl.primary[aria-pressed="true"] { background:var(--primary); color:#fff; }
   .assignbtn.tgl.primary[aria-pressed="true"]:hover { background:var(--primary-dark); }
-  /* Annuler la course : lien discret, en fin de carte, loin des actions courantes */
-  .qcard-foot { margin-top:12px; padding-top:8px; border-top:1px dashed var(--line-soft); display:flex; justify-content:flex-end; }
+  /* Annuler la course : lien discret, à gauche sous les actions de la carte, sans ligne ni bande dédiée */
+  .cancel-row { margin-top:8px; }
   .cancel-link { font:inherit; font-size:11.5px; font-weight:600; background:none; border:none; color:#a85a52; text-decoration:underline; text-underline-offset:2px; cursor:pointer; padding:3px 2px; }
   .cancel-link:hover { color:#b3261e; }
   .cancel-link:focus-visible { outline:2px solid #b3261e; outline-offset:2px; border-radius:4px; }
@@ -716,10 +718,15 @@
 
   function setStatus(s,t){ const e=$('status'); e.classList.remove('ok','down'); if(s)e.classList.add(s); $('status-text').textContent=t; }
 
+  // Une course planifiée ne peut pas être datée dans le passé. Même marge que le serveur (SCHEDULED_PAST_TOLERANCE_MIN
+  // dans src/bookings/bookings.service.ts) : « 14:00 » validé à 14:03 passe encore.
+  const PAST_TOLERANCE_MIN = 5;
+  const earliestSchedule = () => new Date(Date.now() - PAST_TOLERANCE_MIN * 60000);
   $('whenSeg').addEventListener('click',(e)=>{ const b=e.target.closest('button'); if(!b)return;
     when=b.dataset.when;
     setSeg($('whenSeg'), b);
     $('schedWrap').classList.toggle('hidden', when!=='scheduled');
+    if(when==='scheduled') $('scheduledAt').min=localInput(earliestSchedule());   // le sélecteur grise les dates passées
   });
   $('modeSeg').addEventListener('click',(e)=>{ const b=e.target.closest('button'); if(!b)return;
     mode=b.dataset.mode;
@@ -823,18 +830,20 @@
   // Le lien PayDunya n'est plus affiché en entier : « Copier le lien » et « Envoyer par WhatsApp » suffisent
   // (le lien reste dans l'attribut data-url du bouton, rien d'autre n'est montré).
   // Course affectée mais non payée : créer le lien est l'action principale (le départ est bloqué tant que rien n'est payé).
+  // Renvoie des boutons SANS conteneur : payBlock() les range tous dans une seule rangée `.payactions`
+  // (côte à côte, retour à la ligne seulement si la place manque), au lieu d'un bouton par ligne.
   function linkBlock(b, ps){
     const pend = ps.find(p => p.source === 'GATEWAY' && p.status === 'PENDING' && safeUrl(p.paymentUrl));
     if (!pend) {
       const primary = b.status === 'ASSIGNED' && b.paymentStatus !== 'PAID' && !activeWaiver(b);
-      return `<div><button class="assignbtn${primary ? ' primary' : ''}" data-action="paylink">Créer le lien de paiement</button></div>`;
+      return [`<button class="assignbtn${primary ? ' primary' : ''}" data-action="paylink">Créer le lien de paiement</button>`];
     }
     const url = safeUrl(pend.paymentUrl);
-    return `<div class="payactions">
-        <button class="assignbtn" type="button" data-action="copy" data-url="${esc(url)}">Copier le lien</button>
-        <a class="assignbtn wabtn" href="${esc(whatsappLink(b,url))}" target="_blank" rel="noopener noreferrer">Envoyer par WhatsApp</a>
-        <button class="assignbtn" data-action="check" data-payment="${esc(pend.id)}">Vérifier le paiement</button>
-      </div>`;
+    return [
+      `<button class="assignbtn" type="button" data-action="copy" data-url="${esc(url)}">Copier le lien</button>`,
+      `<a class="assignbtn wabtn" href="${esc(whatsappLink(b,url))}" target="_blank" rel="noopener noreferrer">Envoyer par WhatsApp</a>`,
+      `<button class="assignbtn" data-action="check" data-payment="${esc(pend.id)}">Vérifier le paiement</button>`,
+    ];
   }
   function histRow(p){
     const l = [`${esc(fmtDT(p.createdAt))} · ${p.source === 'MANUAL' ? 'Reçu autrement' : 'PayDunya'} · <b>${esc(PAY_LABEL[p.status] || p.status)}</b> · ${esc(money(p.amountFcfa))}${p.isDuplicate ? ' · <b>double paiement</b>' : ''}`];
@@ -872,17 +881,20 @@
     } else {
       // Une course non payée ne part pas : le chauffeur peut être affecté, mais pas « en route »,
       // sauf dérogation d'un responsable (la course reste alors à encaisser).
+      // Les boutons d'action de la zone paiement vont dans UNE rangée (`.payactions`), sous les messages d'état.
+      const acts = [];
       if (w) {
         h += waivedBox(w);
-        if (isManager() && BEFORE_DEPARTURE.includes(b.status)) h += '<div><button class="assignbtn" data-action="unwaive">Retirer la dérogation…</button></div>';
+        if (isManager() && BEFORE_DEPARTURE.includes(b.status)) acts.push('<button class="assignbtn" data-action="unwaive">Retirer la dérogation…</button>');
       } else if (BEFORE_DEPARTURE.includes(b.status)) {
         h += `<div class="blocked">En attente de paiement, départ bloqué${isManager() ? '' : ' — demandez à un responsable'}</div>`;
-        if (isManager()) h += '<div><button class="assignbtn" data-action="waive">Autoriser le départ…</button></div>';
+        if (isManager()) acts.push('<button class="assignbtn" data-action="waive">Autoriser le départ…</button>');
       } else if (b.status === 'EN_ROUTE' || b.status === 'IN_PROGRESS') h += '<div class="unpaidnote">Course en cours, non payée</div>';
       else if (b.status === 'COMPLETED') h += '<div class="unpaidnote">Course terminée, non payée</div>';
       if (b.paymentStatus === 'REFUNDED') h += '<div class="unpaidnote">Paiement remboursé</div>';
-      h += linkBlock(b, ps);
-      if (isManager()) h += '<div><button class="assignbtn" data-action="manual">Paiement reçu autrement…</button></div>';
+      acts.push(...linkBlock(b, ps));
+      if (isManager()) acts.push('<button class="assignbtn" data-action="manual">Paiement reçu autrement…</button>');
+      h += `<div class="payactions">${acts.join('')}</div>`;
     }
     h += dups.map(dupBox).join('');
     // Historique : paiements et dérogations, du plus récent au plus ancien.
@@ -903,18 +915,29 @@
       out.push(ok ? '<button class="stbtn go" data-action="st-EN_ROUTE">Passer en route</button>'
                   : '<button class="stbtn" disabled title="En attente de paiement, départ bloqué">Passer en route</button>');
     }
-    if (['ASSIGNED','EN_ROUTE','IN_PROGRESS'].includes(s)) out.push(`<button class="stbtn${s === 'ASSIGNED' ? '' : ' go'}" data-action="st-COMPLETED">Terminer la course</button>`);
+    // « Terminer la course » seulement une fois la course partie : terminer une course jamais partie n'a pas de sens
+    // au quotidien (et contournerait le blocage du départ). Le serveur n'est pas modifié.
+    if (['EN_ROUTE','IN_PROGRESS'].includes(s)) out.push('<button class="stbtn go" data-action="st-COMPLETED">Terminer la course</button>');
     // Panne, incident : tout le personnel peut changer le chauffeur d'une course en route ou en cours.
     if (['EN_ROUTE','IN_PROGRESS'].includes(s)) out.push('<button class="stbtn" data-action="driver-change">Changer de chauffeur…</button>');
     if (['ASSIGNED','EN_ROUTE'].includes(s)) out.push('<button class="stbtn" data-action="st-NO_SHOW">Client absent…</button>');
     return out.length ? `<div class="stbar">${out.join('')}</div>` : '';
   }
-  // Annuler la course : lien DISCRET en fin de carte, loin des actions courantes (voir .cancel-link).
+  // Annuler la course : lien DISCRET (petit, couleur sourde), à gauche sous les actions, sans ligne dédiée (voir .cancel-link).
   // Annuler une course PAYÉE crée un remboursement à faire : réservé aux responsables et admins.
   function cancelLink(b){
     const paid = b.paymentStatus === 'PAID';
     return ['PENDING','CONFIRMED','ASSIGNED','EN_ROUTE'].includes(b.status) && (!paid || isManager())
-      ? '<div class="qcard-foot"><button class="cancel-link" type="button" data-action="st-CANCELLED">Annuler la course…</button></div>' : '';
+      ? '<div class="cancel-row"><button class="cancel-link" type="button" data-action="st-CANCELLED">Annuler la course…</button></div>' : '';
+  }
+  // Course planifiée dont l'heure est dépassée sans être partie : « En retard », et elle remonte en haut de la liste.
+  // (Une course « dès que possible » n'est jamais en retard : elle n'a pas d'heure.)
+  const isLate = (b) => !b.isImmediate && !!b.scheduledAt && BEFORE_DEPARTURE.includes(b.status) && new Date(b.scheduledAt).getTime() < Date.now();
+  function lateFor(b){
+    const min = Math.max(1, Math.round((Date.now() - new Date(b.scheduledAt).getTime()) / 60000));
+    if (min < 60) return `${min} min`;
+    if (min < 2880) return `${Math.floor(min / 60)} h${pad2(min % 60)}`;
+    return `${Math.floor(min / 1440)} j`;
   }
   function setPayMsg(card,t,isErr){ const m=card&&card.querySelector('.paymsg'); if(m){ m.textContent=t; m.className='paymsg'+(isErr?' err':''); } }
 
@@ -924,7 +947,11 @@
       // (une carte peut avoir deux historiques : paiements « pay » et changements de chauffeur « drv »)
       const openKeys = new Set([...document.querySelectorAll('#queue details[open][data-dk]')].map(d => d.closest('.qcard') && (d.closest('.qcard').dataset.id + '|' + d.dataset.dk)));
       const q=$('queue'); if(!list.length){ q.innerHTML='<div class="empty">Aucune course à venir.</div>'; return; }
-      q.innerHTML=list.map(b=>{
+      // Les courses en retard remontent en haut (la plus en retard d'abord) ; le reste garde l'ordre du serveur.
+      const ordered=[...list].sort((a,c)=>{ const la=isLate(a), lc=isLate(c); if(la!==lc) return la?-1:1; return la ? new Date(a.scheduledAt)-new Date(c.scheduledAt) : 0; });
+      q.innerHTML=ordered.map(b=>{
+        const late=isLate(b);
+        const lateTag=late?`<span class="tag tag-late" title="Heure de prise en charge dépassée sans départ">En retard · ${esc(lateFor(b))}</span>`:'';
         const now=b.isImmediate?'<span class="tag tag-now">Immédiat</span>':'';
         const need=b.needsWheelchairVehicle?'<span class="tag tag-need">PMR</span>':'';
         const paid=b.paymentStatus==='PAID'?'<span class="tag tag-paid">Payé</span>':'';
@@ -941,17 +968,17 @@
             : `<div class="assign-none">${b.needsWheelchairVehicle?'Aucun véhicule adapté disponible':'Aucun chauffeur disponible'} — ajoute via « + Flotte ».</div>`;
         }
         // Sur grand écran, la carte se met sur deux colonnes (course et actions à gauche, paiement à droite).
-        return `<div class="qcard" data-id="${esc(b.id)}">
+        return `<div class="qcard${late?' late':''}" data-id="${esc(b.id)}">
           <div class="qmain">
-            <div class="qcard-top"><span class="ref">${esc(b.reference)}</span>${now}${need}${paid}<span class="badge b-${esc(b.status)}">${esc(statusLabel(b.status))}</span></div>
+            <div class="qcard-top"><span class="ref">${esc(b.reference)}</span>${lateTag}${now}${need}${paid}<span class="badge b-${esc(b.status)}">${esc(statusLabel(b.status))}</span></div>
             <div class="who">${esc(b.client?b.client.fullName:'Passager')}</div>
             <div class="route">${esc(b.pickupAddress)}<span class="arrow">→</span>${esc(b.dropoffAddress)}</div>
             <div class="meta"><span>${esc(when2(b))}</span><span class="price">${esc(money(b.totalPriceFcfa))}</span></div>
             ${action}
             ${statusButtons(b)}
+            ${cancelLink(b)}
           </div>
           <div class="qside">${payBlock(b)}</div>
-          ${cancelLink(b)}
         </div>`;
       }).join('');
       q.querySelectorAll('.qcard details[data-dk]').forEach(d => { if (openKeys.has(d.closest('.qcard').dataset.id + '|' + d.dataset.dk)) d.open = true; });
@@ -1573,7 +1600,9 @@
       payload.pickupLat=estimate.pickupLat; payload.pickupLng=estimate.pickupLng;
       payload.dropoffLat=estimate.dropoffLat; payload.dropoffLng=estimate.dropoffLng;
       payload.viaToll=$('viaToll').checked; }
-    if(when==='scheduled'){ const s=$('scheduledAt').value; if(!s) return setMsg('Indique la date et l\'heure.','err'); payload.scheduledAt=new Date(s).toISOString(); }
+    if(when==='scheduled'){ const s=$('scheduledAt').value; if(!s) return setMsg('Indique la date et l\'heure.','err');
+      if(new Date(s).getTime() < earliestSchedule().getTime()){ $('scheduledAt').focus(); return setMsg('Cette date et cette heure sont déjà passées. Choisis une heure à venir, ou « Dès que possible ».','err'); }
+      payload.scheduledAt=new Date(s).toISOString(); }
 
     const bb=$('bookedBy').value.trim(); if(bb)payload.bookedByName=bb;
     const bp=$('bookedByPhone').value.trim(); if(bp)payload.bookedByPhone=bp;

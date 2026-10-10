@@ -45,6 +45,11 @@ const DEPARTURE_STATUSES: BookingStatus[] = ['EN_ROUTE', 'IN_PROGRESS'];
 
 const CANCEL_REASON_MIN = 5;
 
+// Une course planifiée ne peut pas être datée dans le passé. Petite marge : un opérateur qui choisit « 14:00 »
+// et valide à 14:03 n'est pas bloqué. La console applique la même marge (PAST_TOLERANCE_MIN dans
+// public/console-operateur.html ; contrôlé par `npm run test:console`).
+export const SCHEDULED_PAST_TOLERANCE_MIN = 5;
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -79,6 +84,13 @@ export class BookingsService {
     const scheduledAt = isImmediate
       ? new Date()
       : new Date(dto.scheduledAt as string);
+    if (!isImmediate && scheduledAt.getTime() < Date.now() - SCHEDULED_PAST_TOLERANCE_MIN * 60_000) {
+      throw coded(
+        400,
+        'SCHEDULED_IN_PAST',
+        "L'heure de prise en charge est déjà passée. Choisir une date à venir, ou « Dès que possible ».",
+      );
+    }
 
     // Tarification : prix fixe saisi par l'opérateur, ou compteur (distanceMeters, depuis les adresses)
     if (!dto.fixedPriceFcfa && (dto.distanceMeters == null || dto.distanceMeters <= 0)) {

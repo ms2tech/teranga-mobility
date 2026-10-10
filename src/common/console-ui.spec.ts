@@ -103,15 +103,35 @@ test('cartes : statut « À affecter » (et non « En attente »), actions en ve
   for (const verb of ['Passer en route', 'Terminer la course', 'Changer de chauffeur…', 'Client absent…']) assert.ok(sb.includes(verb), `bouton « ${verb} » manquant`);
   assert.ok(!/>(En route|Terminée|Client absent|Annulée…)</.test(sb), 'ancien libellé sans verbe');
 });
-test('cartes : action principale mise en avant (go / primary) et Annuler la course… discret, en fin de carte', () => {
+test('cartes : action principale mise en avant (go / primary) ; « Terminer la course » seulement une fois la course partie', () => {
   const sb = fn('statusButtons');
-  assert.ok(/class="stbtn go" data-action="st-EN_ROUTE"/.test(sb) && /s === 'ASSIGNED' \? '' : ' go'/.test(sb), 'action principale Passer en route / Terminer la course');
+  assert.ok(/class="stbtn go" data-action="st-EN_ROUTE"/.test(sb), 'action principale Passer en route');
   assert.ok(/class="assignbtn tgl primary"/.test(script), "Affecter un chauffeur n'est pas l'action principale d'une course à affecter");
+  // Terminer une course jamais partie n'a pas de sens au quotidien (et contournerait le blocage du départ)
+  const doneFor = /\[([^\]]*)\]\.includes\(s\)\) out\.push\('<button class="stbtn go" data-action="st-COMPLETED"/.exec(sb)?.[1];
+  assert.equal(doneFor?.replace(/\s/g, ''), "'EN_ROUTE','IN_PROGRESS'", `« Terminer la course » proposé pour : ${doneFor ?? '(introuvable)'}`);
   assert.ok(!/st-CANCELLED/.test(sb), "l'annulation est encore parmi les actions courantes");
-  assert.ok(/function cancelLink\(b\)[\s\S]*?class="cancel-link"[^>]*data-action="st-CANCELLED">Annuler la course…</.test(script), "lien d'annulation absent");
-  assert.ok(/\$\{payBlock\(b\)\}<\/div>\s*\$\{cancelLink\(b\)\}\s*<\/div>/.test(script), "l'annulation doit être le dernier élément de la carte");
+});
+test('cartes : « Annuler la course… » discret, à gauche sous les actions, sans bande dédiée', () => {
+  assert.ok(/function cancelLink\(b\)[\s\S]*?class="cancel-row"><button class="cancel-link"[^>]*data-action="st-CANCELLED">Annuler la course…</.test(script), "lien d'annulation absent");
+  assert.ok(/\$\{statusButtons\(b\)\}\s*\$\{cancelLink\(b\)\}\s*<\/div>\s*<div class="qside">/.test(script), 'le lien doit suivre les actions dans la colonne de gauche (.qmain)');
+  assert.ok(!/qcard-foot/.test(css) && !/qcard-foot/.test(script), 'ancienne bande pleine largeur encore présente');
+  assert.ok(!/\.cancel-row \{[^}]*border/.test(css), 'le lien a une ligne dédiée (bordure)');
   assert.ok(/@container queue \(min-width: \d+px\)/.test(css) && /class="qmain"/.test(script) && /class="qside"/.test(script), 'carte sur deux colonnes sur grand écran');
   assert.ok(/\.cancel-link \{[^}]*font-size:11\.5px/.test(css), 'lien discret (petit)');
+});
+test('cartes : une course planifiée dont l\'heure est dépassée sans départ est « En retard » et remonte en haut', () => {
+  const late = /const isLate = \(b\) => ([^;]*);/.exec(script)?.[1] ?? '';
+  assert.ok(/!b\.isImmediate/.test(late) && /scheduledAt/.test(late) && /BEFORE_DEPARTURE\.includes\(b\.status\)/.test(late) && /< Date\.now\(\)/.test(late), `condition de retard : ${late}`);
+  assert.ok(/class="tag tag-late"[^>]*>En retard/.test(script) && /\.tag-late \{/.test(css), 'pastille « En retard » manquante');
+  assert.ok(/const ordered=\[\.\.\.list\]\.sort\(/.test(script) && /if\(la!==lc\) return la\?-1:1/.test(script), 'les courses en retard ne remontent pas en haut');
+});
+test('paiement : les boutons d\'action de la zone paiement sont côte à côte dans une seule rangée', () => {
+  const pb = fn('payBlock');
+  assert.equal((pb.match(/class="payactions"/g) ?? []).length, 1, 'une seule rangée .payactions attendue');
+  for (const label of ['Autoriser le départ…', 'Retirer la dérogation…', 'Paiement reçu autrement…']) assert.ok(pb.includes(label), `bouton « ${label} » manquant`);
+  assert.ok(!/<div><button/.test(pb) && !/<div><button/.test(fn('linkBlock')), 'un bouton seul dans son <div> (empilement)');
+  assert.ok(/\.payactions \{[^}]*flex-wrap:wrap/.test(css), 'retour à la ligne seulement si la place manque');
 });
 test('paiement : pas de « Payé via PayDunya » en double, pas de lien en entier, mais Copier le lien et WhatsApp', () => {
   assert.ok(!/Payé via PayDunya/.test(script), '« Payé via PayDunya » répété');
@@ -136,6 +156,15 @@ test('formulaire : « Motif du déplacement » sans valeur par défaut, choix ob
   assert.ok(/<option value="" disabled selected>/.test(sel) && !/<option value="[A-Z]+" selected>/.test(sel), 'une valeur est présélectionnée');
   assert.ok(/<label for="purpose">[^<]*<span class="req">/.test(markup), 'astérisque manquant');
   assert.ok(script.includes("if(!$('purpose').value)") && script.includes("$('purpose').value=''"), "contrôle à l'envoi ou remise à vide manquants");
+});
+test('formulaire : une course planifiée ne peut pas être datée dans le passé (même marge que le serveur)', () => {
+  const svc = fs.readFileSync(path.resolve(process.cwd(), 'src', 'bookings', 'bookings.service.ts'), 'utf8');
+  const server = Number(/SCHEDULED_PAST_TOLERANCE_MIN = (\d+)/.exec(svc)?.[1]);
+  const client = Number(/const PAST_TOLERANCE_MIN = (\d+)/.exec(script)?.[1]);
+  assert.ok(server > 0 && server === client, `marge du serveur (${server}) et de la console (${client}) différentes`);
+  assert.ok(/'SCHEDULED_IN_PAST'/.test(svc), 'le serveur ne refuse pas une date passée');
+  assert.ok(script.includes("$('scheduledAt').min=localInput(earliestSchedule())"), 'le sélecteur ne grise pas les dates passées');
+  assert.ok(/earliestSchedule\(\)\.getTime\(\)\)\{[^}]*déjà passées/.test(script), "contrôle à l'envoi manquant");
 });
 
 console.log(`\n${passed}/${passed + failed} contrôles réussis.`);

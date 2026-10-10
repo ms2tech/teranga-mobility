@@ -53,7 +53,7 @@ Tests conservés, sans base de données ni serveur (quelques secondes) :
 npm test                  # tarification + données sensibles + interface
 npm run test:pricing      # moteur de tarification (12 cas)
 npm run test:sensitive    # aucune réponse ne doit contenir passwordHash (voir « Données sensibles »)
-npm run test:console      # règles d'interface de la console (16 contrôles, voir « Console opérateur »)
+npm run test:console      # règles d'interface de la console (20 contrôles, voir « Console opérateur »)
 ```
 
 > Note : `prisma generate` télécharge un moteur natif depuis
@@ -83,17 +83,28 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
 - **Nouvelle réservation** : passager, trajet libre (prix calculé depuis les deux
   adresses via Google Maps, péage compris) ou prix fixe, horaire, accessibilité.
   Le **motif du déplacement** n'a pas de valeur par défaut : le choix est obligatoire.
+  Une course **planifiée** ne peut pas être datée dans le passé : le sélecteur grise les dates
+  passées, la console refuse l'envoi avec un message clair et le serveur répond
+  `400 SCHEDULED_IN_PAST` (marge de 5 minutes : « 14:00 » validé à 14:03 passe encore).
 - **Courses à venir** : file de dispatch et affectation d'un chauffeur (possible
   tant que la course n'est pas partie). Une course sans chauffeur porte le statut
   **« À AFFECTER »** (et non « En attente », qui prêtait à confusion avec un paiement en attente).
+  Une course **planifiée dont l'heure est dépassée sans être partie** (à affecter, confirmée ou
+  affectée) est signalée **« En retard · 3 h02 »** (pastille rouge, trait rouge à gauche de la
+  carte) et **remonte en haut de la liste**, la plus en retard d'abord. Une course « dès que
+  possible » n'a pas d'heure : elle n'est jamais en retard. Rien ne se fait tout seul : l'opérateur
+  affecte, reprogramme (annuler puis réserver à nouveau) ou annule.
 - **Boutons de statut** sur chaque course, avec des verbes : **Passer en route** (chauffeur
   affecté obligatoire), **Terminer la course**, **Client absent…**, **Changer de chauffeur…**.
   Seuls les boutons permis par l'état de la course sont proposés ; Terminée, Annulée et
-  Client absent sont définitifs. **Une seule action principale** est mise en avant selon l'état
-  (contour marqué ou fond plein) : « Affecter un chauffeur » pour une course à affecter,
-  « Créer le lien de paiement » pour une course affectée non payée, « Terminer la course »
-  quand elle est en route. **« Annuler la course… »** est un lien discret, tout en bas de la
-  carte, loin des actions courantes (motif obligatoire).
+  Client absent sont définitifs. **« Terminer la course » n'apparaît qu'une fois la course
+  partie** (en route ou en cours) : terminer une course jamais partie n'a pas de sens au
+  quotidien. Le serveur, lui, accepte toujours la transition `ASSIGNED → COMPLETED`.
+  **Une seule action principale** est mise en avant selon l'état (contour marqué ou fond plein) :
+  « Affecter un chauffeur » pour une course à affecter, « Créer le lien de paiement » pour une
+  course affectée non payée, « Passer en route » quand elle est payée, « Terminer la course »
+  quand elle est en route. **« Annuler la course… »** est un petit lien discret, à gauche sous
+  les actions de la carte, sans ligne ni bande dédiée (motif obligatoire).
 - **Changer de chauffeur…** (tout le personnel) sur une course **en route** ou **en cours** :
   panne, incident. Choix du nouveau chauffeur et de son véhicule, motif obligatoire.
   La course garde son statut, son paiement et son prix ; l'historique des changements
@@ -102,7 +113,9 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   complet va dans le presse-papiers, il n'est jamais affiché en entier sur la carte) et
   **« Envoyer par WhatsApp »** (au proche ou, à défaut, au passager), badge **Payé**
   (« Paiement reçu ✓ · PayDunya », sans seconde ligne qui répète le moyen), et
-  « Vérifier le paiement » si la notification n'est pas arrivée.
+  « Vérifier le paiement » si la notification n'est pas arrivée. Les boutons de la zone
+  paiement (« Autoriser le départ… », « Créer le lien de paiement », « Paiement reçu
+  autrement… »…) se placent **côte à côte** et ne passent à la ligne que si la place manque.
 - **Une course non payée ne part pas** : le chauffeur peut être affecté à l'avance,
   mais la course affiche « En attente de paiement, départ bloqué » et l'API refuse
   le passage à `EN_ROUTE` tant qu'elle n'est pas payée, sauf **dérogation de départ**.
@@ -485,7 +498,7 @@ autoroute, majoration PMR, majoration VIP, accompagnement, commission.
 | `POST`  | `/api/routes/:id/reactivate`              | Réactiver un corridor, `basedOnVersion`, motif (**ADMIN**) |
 | `POST`  | `/api/pricing/quote`                      | Devis instantané (détail ligne à ligne) ; `routeId` refusé (400 `CORRIDOR_BOOKING_DISABLED`) |
 | `POST`  | `/api/pricing/estimate`                   | Devis à partir de deux adresses (Google Maps)|
-| `POST`  | `/api/bookings`                           | Créer une réservation (trajet libre ou prix fixe ; `routeId` refusé : 400 `CORRIDOR_BOOKING_DISABLED` ; `expectedTotalFcfa` facultatif : 409 `TARIFF_CHANGED` si le prix a changé) |
+| `POST`  | `/api/bookings`                           | Créer une réservation (trajet libre ou prix fixe ; `routeId` refusé : 400 `CORRIDOR_BOOKING_DISABLED` ; `expectedTotalFcfa` facultatif : 409 `TARIFF_CHANGED` si le prix a changé ; course planifiée dans le passé, au-delà de 5 min : 400 `SCHEDULED_IN_PAST`) |
 | `GET`   | `/api/bookings/upcoming`                  | File des courses à venir (avec tous leurs paiements) |
 | `GET`   | `/api/bookings/:id`                       | Détail d'une réservation                     |
 | `GET`   | `/api/bookings/to-collect`                | Courses à encaisser (**MANAGER, ADMIN**)     |
