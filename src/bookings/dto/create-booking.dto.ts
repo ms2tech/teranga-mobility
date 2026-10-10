@@ -39,7 +39,9 @@ export class CreateBookingDto {
   // Motif du trajet
   @IsOptional() @IsEnum(TripPurpose) tripPurpose?: TripPurpose;
 
-  // Trajet libre : adresses quelconques. Corridor à prix fixe : routeId (facultatif).
+  // Trajet libre : adresses quelconques. `routeId` (corridor) est REFUSÉ pour le moment (400
+  // CORRIDOR_BOOKING_DISABLED, voir pricing/corridor-guard.ts) : le champ reste déclaré pour renvoyer
+  // ce message clair plutôt qu'une erreur de validation générique.
   @IsOptional() @IsString() routeId?: string;
   @IsOptional() @IsInt() @Min(1) fixedPriceFcfa?: number;
   // Prix que l'opérateur a vu et annoncé au client. Si le prix recalculé à la création

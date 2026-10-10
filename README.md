@@ -348,9 +348,12 @@ l'affectation suffit ; une course terminée, annulée ou « client absent » ne 
 > **Décision d'origine : le prix d'une réservation vient toujours des adresses (trajet
 > libre) ou d'un prix fixe saisi par l'opérateur.** Le site public n'utilisera que le trajet
 > libre. La gestion des corridors reste en place, mais **ils ne servent pas à réserver** :
-> ni la console ni le futur site ne proposent de réserver sur un corridor (l'API accepte
-> encore `routeId`, sans interface qui l'utilise). Les utiliser pour réserver (console et
-> site public) viendra bien après le lancement.
+> ni la console ni le futur site ne proposent de réserver sur un corridor, et **l'API
+> refuse `routeId`**, à la création d'une réservation comme au devis
+> (`400 CORRIDOR_BOOKING_DISABLED`, message : « Réserver sur un corridor n'est pas possible
+> pour le moment… Retirez routeId »). Les utiliser pour réserver (console et site public)
+> viendra bien après le lancement : il suffira alors de passer `CORRIDOR_BOOKING_ENABLED` à
+> `true` dans `src/pricing/corridor-guard.ts` et d'ajouter l'usage dans les interfaces.
 
 Un corridor est un trajet à prix fixe : ville ↔ AIBD, ou ville ↔ ville (par exemple
 Thiès ↔ Touba). Les cinq axes AIBD du seed sont les valeurs de **départ** :
@@ -377,10 +380,9 @@ Thiès ↔ Touba). Les cinq axes AIBD du seed sont les valeurs de **départ** :
   de chaque corridor).
 - **Les prix déjà calculés restent figés** : le prix d'une réservation est copié dans la
   réservation à sa création. Un changement de prix ne touche que les réservations créées
-  ensuite. Le garde-fou `expectedTotalFcfa` couvre aussi les réservations à prix de
-  corridor : si le prix du corridor change entre le devis et la création,
-  `409 TARIFF_CHANGED`. (Aucune interface ne réserve sur un corridor : cela ne concerne que
-  l'API.)
+  ensuite. Comme aucune réservation ne se fait sur un corridor, modifier un prix de corridor
+  ne change le prix d'aucune réservation, ni existante ni à venir : les réservations déjà
+  liées à un corridor (anciennes) gardent leur prix.
 - **Deux admins en même temps** : chaque corridor a une `version` ; la requête indique celle
   sur laquelle elle s'appuie, sinon `409 ROUTE_VERSION_STALE`.
 - **Le code, le nom et la ville ne changent pas** après la création (le code est
@@ -453,9 +455,9 @@ autoroute, majoration PMR, majoration VIP, accompagnement, commission.
 | `PATCH` | `/api/routes/:id`                         | Nouveaux prix et durée, `basedOnVersion`, motif (**ADMIN**) |
 | `POST`  | `/api/routes/:id/deactivate`              | Désactiver un corridor, `basedOnVersion`, motif (**ADMIN**) |
 | `POST`  | `/api/routes/:id/reactivate`              | Réactiver un corridor, `basedOnVersion`, motif (**ADMIN**) |
-| `POST`  | `/api/pricing/quote`                      | Devis instantané (détail ligne à ligne)      |
+| `POST`  | `/api/pricing/quote`                      | Devis instantané (détail ligne à ligne) ; `routeId` refusé (400 `CORRIDOR_BOOKING_DISABLED`) |
 | `POST`  | `/api/pricing/estimate`                   | Devis à partir de deux adresses (Google Maps)|
-| `POST`  | `/api/bookings`                           | Créer une réservation (`expectedTotalFcfa` facultatif : 409 `TARIFF_CHANGED` si le prix a changé) |
+| `POST`  | `/api/bookings`                           | Créer une réservation (trajet libre ou prix fixe ; `routeId` refusé : 400 `CORRIDOR_BOOKING_DISABLED` ; `expectedTotalFcfa` facultatif : 409 `TARIFF_CHANGED` si le prix a changé) |
 | `GET`   | `/api/bookings/upcoming`                  | File des courses à venir (avec tous leurs paiements) |
 | `GET`   | `/api/bookings/:id`                       | Détail d'une réservation                     |
 | `GET`   | `/api/bookings/to-collect`                | Courses à encaisser (**MANAGER, ADMIN**)     |
@@ -495,7 +497,7 @@ autoroute, majoration PMR, majoration VIP, accompagnement, commission.
 ```bash
 curl -X POST http://localhost:3000/api/pricing/quote \
   -H "Content-Type: application/json" \
-  -d '{ "routeId": "<id>", "serviceType": "PMR",
+  -d '{ "distanceMeters": 10000, "durationSeconds": 1200, "serviceType": "PMR",
         "needsWheelchairVehicle": true, "withAccompaniment": true }'
 ```
 

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MapsService } from '../maps/maps.service';
 import { TariffsService } from '../tariffs/tariffs.service';
 import { Quote, computeQuote } from './compute-quote';
+import { assertCorridorBookingAllowed } from './corridor-guard';
 
 export type { PriceLine, Quote, ComputeParams } from './compute-quote';
 
@@ -50,6 +51,8 @@ export class PricingService {
 
   /** Devis à partir d'un corridor (FLAT) ou d'une distance (METERED), avec la version courante du barème. */
   async quote(input: QuoteInput): Promise<Quote> {
+    // Les corridors ne servent pas à réserver (jusqu'à « bien après le lancement ») : voir corridor-guard.ts.
+    assertCorridorBookingAllowed(input.routeId);
     const tariff = await this.tariffs.current();
 
     // Prix fixe saisi par l'opérateur : forfait tout compris (priorité)
@@ -86,7 +89,7 @@ export class PricingService {
     }
     if (input.distanceMeters == null || input.distanceMeters <= 0) {
       throw new BadRequestException(
-        'Préciser un routeId (corridor) ou une distanceMeters (trajet libre).',
+        'Préciser une distanceMeters (trajet libre) ou un fixedPriceFcfa (prix fixe saisi par l\'opérateur).',
       );
     }
     return computeQuote(

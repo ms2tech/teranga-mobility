@@ -2,7 +2,9 @@ import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-valid
 import { ServiceType } from '@prisma/client';
 
 /**
- * Devis hybride : `routeId` -> prix fixe ; sinon `distanceMeters` -> compteur.
+ * Devis : `fixedPriceFcfa` -> prix fixe saisi par l'opérateur ; sinon `distanceMeters` -> compteur.
+ * `routeId` (corridor) est REFUSÉ pour le moment (400 CORRIDOR_BOOKING_DISABLED, voir
+ * pricing/corridor-guard.ts) : le champ reste déclaré pour renvoyer ce message clair.
  */
 export class QuoteRequestDto {
   @IsOptional() @IsString() routeId?: string;

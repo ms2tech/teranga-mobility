@@ -11,6 +11,7 @@ import { PricingService } from '../pricing/pricing.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { generateBookingReference } from '../common/reference';
 import { coded } from '../common/coded';
+import { assertCorridorBookingAllowed } from '../pricing/corridor-guard';
 import { CLIENT_SUMMARY, DRIVER_SUMMARY, ROUTE_SUMMARY, VEHICLE_ON_BOOKING } from '../common/safe-selects';
 import { PAYMENT_PEOPLE } from '../payments/payment.include';
 import { STATUS_LABEL } from './booking-status';
@@ -52,12 +53,16 @@ export class BookingsService {
   ) {}
 
   /**
-   * Crée une réservation : trajet libre (au compteur) OU corridor à prix fixe.
+   * Crée une réservation : trajet libre (au compteur, depuis les adresses) OU prix fixe saisi
+   * par l'opérateur. Jamais sur un corridor (refusé : voir pricing/corridor-guard.ts).
    * Gère le passager (existant ou créé à la volée), le moment (immédiat ou
    * planifié), fige le tarif + la répartition commission/chauffeur, et applique
    * la cohérence fauteuil roulant -> véhicule adapté.
    */
   async create(dto: CreateBookingDto, createdById?: string): Promise<Booking> {
+    // Premier contrôle, avant tout autre : une réservation sur corridor est refusée avec un message clair.
+    assertCorridorBookingAllowed(dto.routeId);
+
     if (!dto.clientId && !dto.newClient) {
       throw new BadRequestException(
         'Préciser un clientId existant ou les informations newClient.',
@@ -75,10 +80,10 @@ export class BookingsService {
       ? new Date()
       : new Date(dto.scheduledAt as string);
 
-    // Tarification : prix fixe, corridor (routeId) ou compteur (distanceMeters)
-    if (!dto.routeId && !dto.fixedPriceFcfa && (dto.distanceMeters == null || dto.distanceMeters <= 0)) {
+    // Tarification : prix fixe saisi par l'opérateur, ou compteur (distanceMeters, depuis les adresses)
+    if (!dto.fixedPriceFcfa && (dto.distanceMeters == null || dto.distanceMeters <= 0)) {
       throw new BadRequestException(
-        'Préciser un prix fixe, un routeId (corridor) ou une distanceMeters (trajet libre).',
+        'Préciser un prix fixe (fixedPriceFcfa) ou une distanceMeters (trajet libre).',
       );
     }
 
