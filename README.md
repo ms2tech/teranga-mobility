@@ -50,9 +50,10 @@ En production : `npm run build` puis `npm run start:prod` (le build sort dans
 Tests conservés, sans base de données ni serveur (quelques secondes) :
 
 ```bash
-npm test                  # tarification + données sensibles
+npm test                  # tarification + données sensibles + interface
 npm run test:pricing      # moteur de tarification (12 cas)
 npm run test:sensitive    # aucune réponse ne doit contenir passwordHash (voir « Données sensibles »)
+npm run test:console      # règle d'interface : boutons de panneau (voir « Console opérateur »)
 ```
 
 > Note : `prisma generate` télécharge un moteur natif depuis
@@ -111,6 +112,12 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   désactiver ou réactiver un corridor, consulter son historique (voir « Corridors à prix
   fixe »).
 - **Flotte** : ajout d'un chauffeur avec son véhicule.
+- **Boutons qui ouvrent un panneau** (« À régler », « + Flotte », « Affecter un chauffeur ») :
+  quand le panneau est ouvert, le bouton est **en fond plein** (couleur différente), son icône
+  devient **✕** (fermer) et son infobulle dit « Fermer le panneau… » ; il porte `aria-pressed`.
+  Le panneau a un **titre** clair et un bouton **« Fermer »**, qui rend le focus au bouton. Les
+  choix exclusifs (Trajet libre / Prix fixe, Dès que possible / Planifier) portent aussi
+  `aria-pressed`. Même règle pour tout futur bouton de ce type (contrôlée par `npm run test:console`).
 
 ---
 

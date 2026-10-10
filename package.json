@@ -13,9 +13,10 @@
     "prisma:seed": "ts-node prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:pricing && npm run test:sensitive",
+    "test": "npm run test:pricing && npm run test:sensitive && npm run test:console",
     "test:pricing": "ts-node src/pricing/pricing.spec.ts",
     "test:sensitive": "ts-node src/common/sensitive-fields.spec.ts",
+    "test:console": "ts-node src/common/console-ui.spec.ts",
     "user:create": "ts-node prisma/create-user.ts"
   },
   "prisma": {

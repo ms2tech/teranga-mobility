@@ -97,6 +97,18 @@
   .queue-tools { display:flex; align-items:center; gap:8px; margin-left:auto; }
   .iconbtn { font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; background:var(--primary-tint); color:var(--primary-dark); border:none; padding:7px 12px; border-radius:999px; }
   .iconbtn:hover { background:#d3e6e0; }
+  /* Boutons qui ouvrent / ferment un panneau (À régler, Flotte, Affecter un chauffeur) : quand le panneau est
+     ouvert, fond plein et couleur différente (aria-pressed="true"), et l'icône passe de « ouvrir » à ✕. */
+  .tgl { display:inline-flex; align-items:center; gap:6px; }
+  .tgl .tgl-ico { font-size:11px; line-height:1; width:12px; text-align:center; font-weight:800; }
+  .iconbtn.tgl[aria-pressed="true"], .assignbtn.tgl[aria-pressed="true"] { background:var(--primary); color:#fff; box-shadow:0 0 0 2px rgba(14,110,92,.28); }
+  .iconbtn.tgl[aria-pressed="true"]:hover, .assignbtn.tgl[aria-pressed="true"]:hover { background:var(--primary-dark); }
+  .iconbtn.tgl[aria-pressed="true"] .countbadge { background:#fff; color:#b3261e; }
+  .iconbtn:focus-visible, .assignbtn:focus-visible, .closebtn:focus-visible, .seg button:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+  .phead { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .phead .section-label { margin:0; }
+  .closebtn { margin-left:auto; flex:none; font:inherit; font-size:12px; font-weight:600; cursor:pointer; background:#fff; color:var(--muted); border:1px solid var(--line); padding:5px 12px; border-radius:999px; }
+  .closebtn:hover { background:var(--primary-tint); color:var(--primary-dark); }
   .queue { display:flex; flex-direction:column; }
   .qcard { padding:14px 20px; border-bottom:1px solid var(--line-soft); }
   .qcard:last-child { border-bottom:none; }
@@ -119,7 +131,10 @@
   .assign { margin-top:9px; }
   .assignbtn { font:inherit; font-size:12px; font-weight:700; cursor:pointer; color:var(--primary-dark); background:var(--primary-tint); border:none; padding:6px 12px; border-radius:999px; }
   .assignbtn:hover { background:#d3e6e0; }
-  .assign-box { margin-top:8px; display:flex; gap:6px; }
+  .assign-box { margin-top:8px; display:flex; flex-direction:column; gap:8px; padding:9px 11px; border:1px solid var(--line); border-left:3px solid var(--primary); border-radius:var(--radius-sm); background:#fbfcfb; }
+  .assign-head { display:flex; align-items:center; gap:8px; }
+  .assign-title { font-size:12px; font-weight:700; color:var(--primary-dark); }
+  .assign-row { display:flex; gap:6px; }
   .assign-box select { padding:7px 9px; font-size:12.5px; }
   .assign-confirm { font:inherit; font-size:12px; font-weight:700; cursor:pointer; color:#fff; background:var(--primary); border:none; padding:0 14px; border-radius:var(--radius-sm); flex:none; }
   .assign-none { font-size:12px; color:#b3261e; margin-top:6px; }
@@ -188,7 +203,7 @@
   .dialog .btn { width:100%; margin-top:16px; }
   .dialog .formmsg { display:block; margin-top:12px; min-height:18px; }
   .dialog .linkbtn { display:block; margin:12px auto 0; font:inherit; font-size:12.5px; font-weight:600; background:none; border:none; color:var(--muted); cursor:pointer; text-decoration:underline; }
-  .fleet { padding:16px 20px; border-bottom:1px solid var(--line-soft); background:#fbfcfb; }
+  .fleet { padding:16px 20px; border-bottom:1px solid var(--line-soft); border-left:3px solid var(--primary); background:#fbfcfb; }
   .fleet .grid { gap:10px; }
   .fleet .fleet-actions { margin-top:12px; display:flex; align-items:center; gap:12px; }
   /* Tarifs des trajets libres (ADMIN) */
@@ -271,8 +286,8 @@
         <div class="section">
           <p class="section-label"><span class="num">2</span> Trajet</p>
           <div class="seg" id="modeSeg" style="margin-bottom:14px;">
-            <button type="button" data-mode="free" class="active">Trajet libre (carte)</button>
-            <button type="button" data-mode="fixed">Prix fixe</button>
+            <button type="button" data-mode="free" class="active" aria-pressed="true">Trajet libre (carte)</button>
+            <button type="button" data-mode="fixed" aria-pressed="false">Prix fixe</button>
           </div>
           <div class="grid">
             <div class="field full"><label for="purpose">Motif du déplacement</label>
@@ -302,8 +317,8 @@
         <div class="section">
           <p class="section-label"><span class="num">3</span> Quand</p>
           <div class="seg" id="whenSeg" style="margin-bottom:14px;">
-            <button type="button" data-when="immediate" class="active">Dès que possible</button>
-            <button type="button" data-when="scheduled">Planifier</button>
+            <button type="button" data-when="immediate" class="active" aria-pressed="true">Dès que possible</button>
+            <button type="button" data-when="scheduled" aria-pressed="false">Planifier</button>
           </div>
           <div class="grid">
             <div class="field hidden full" id="schedWrap">
@@ -349,13 +364,15 @@
 
     <section class="panel" aria-labelledby="ttl-queue">
       <div class="panel-head"><h2 id="ttl-queue">Courses à venir</h2><span class="updated" id="updated" aria-live="off"></span>
-        <div class="queue-tools"><button class="iconbtn hidden" id="refundToggle" type="button">À régler<span class="countbadge hidden" id="refundCount">0</span></button><button class="iconbtn" id="fleetToggle">+ Flotte</button><button class="iconbtn" id="refresh">Actualiser</button></div></div>
-      <div class="fleet hidden" id="refundPanel">
-        <p class="section-label" style="margin-bottom:4px;"><span class="num">!</span> À régler</p>
+        <!-- Boutons qui ouvrent / ferment un panneau : aria-pressed, fond plein quand le panneau est ouvert,
+             et l'icône passe de « ouvrir » à ✕ (fermer). Voir setPanel() dans le script. -->
+        <div class="queue-tools"><button class="iconbtn tgl hidden" id="refundToggle" type="button" aria-pressed="false" aria-controls="refundPanel" data-label="À régler" data-ico-closed="▾" title="Ouvrir le panneau « À régler »"><span class="tgl-ico" aria-hidden="true">▾</span><span>À régler</span><span class="countbadge hidden" id="refundCount">0</span></button><button class="iconbtn tgl" id="fleetToggle" type="button" aria-pressed="false" aria-controls="fleetPanel" data-label="Flotte" data-ico-closed="+" title="Ouvrir le panneau « Flotte »"><span class="tgl-ico" aria-hidden="true">+</span><span>Flotte</span></button><button class="iconbtn" id="refresh">Actualiser</button></div></div>
+      <div class="fleet hidden" id="refundPanel" role="region" aria-labelledby="refundTitle">
+        <div class="phead"><h3 class="section-label" id="refundTitle"><span class="num">!</span> À régler : à encaisser et à rembourser</h3><button class="closebtn" type="button" data-close-panel="refundPanel">Fermer</button></div>
         <div id="refundList"></div>
       </div>
-      <div class="fleet hidden" id="fleetPanel">
-        <p class="section-label" style="margin-bottom:12px;"><span class="num">+</span> Ajouter un chauffeur &amp; son véhicule</p>
+      <div class="fleet hidden" id="fleetPanel" role="region" aria-labelledby="fleetTitle">
+        <div class="phead"><h3 class="section-label" id="fleetTitle"><span class="num">+</span> Ajouter un chauffeur &amp; son véhicule</h3><button class="closebtn" type="button" data-close-panel="fleetPanel">Fermer</button></div>
         <div class="grid">
           <div class="field"><label for="fName">Nom du chauffeur</label><input id="fName" type="text" placeholder="Ex. Ibrahima Fall" autocomplete="off" /></div>
           <div class="field"><label for="fPhone">Téléphone</label><input id="fPhone" type="tel" placeholder="+221 7…" autocomplete="off" /></div>
@@ -512,7 +529,7 @@
     $('queue').innerHTML = '<div class="empty">Connecte-toi pour voir les courses.</div>';
     $('updated').textContent = '';
     resetForm();
-    ['fName','fPhone','fReg'].forEach(x=>$(x).value=''); $('fleetPanel').classList.add('hidden');
+    ['fName','fPhone','fReg'].forEach(x=>$(x).value=''); setPanel('fleetPanel', false);
   }
 
   $('loginForm').addEventListener('submit', async (e)=>{
@@ -579,6 +596,24 @@
     }
     await refreshAll(false);
   }
+  // ── Panneaux qui s'ouvrent et se ferment (À régler, Flotte) ──────────────────────
+  // Un seul endroit change l'état : le panneau, ET son bouton (aria-pressed, icône ▾ / + → ✕, infobulle).
+  // Quand le panneau est ouvert, le bouton est en fond plein (voir .tgl dans le CSS) ; « Fermer » le referme.
+  const PANEL_TOGGLES = { refundPanel: 'refundToggle', fleetPanel: 'fleetToggle' };
+  function setPanel(id, open){
+    const panel = $(id), btn = $(PANEL_TOGGLES[id]);
+    panel.classList.toggle('hidden', !open);
+    btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+    btn.querySelector('.tgl-ico').textContent = open ? '✕' : btn.dataset.icoClosed;
+    btn.title = (open ? 'Fermer' : 'Ouvrir') + ' le panneau « ' + btn.dataset.label + ' »';
+  }
+  const togglePanel = (id) => setPanel(id, $(id).classList.contains('hidden'));
+  document.querySelectorAll('[data-close-panel]').forEach(b => b.addEventListener('click', ()=>{
+    const id = b.dataset.closePanel; setPanel(id, false); $(PANEL_TOGGLES[id]).focus();   // le focus revient au bouton
+  }));
+  // Choix exclusifs (Trajet libre / Prix fixe, Dès que possible / Planifier) : fond plein sur le choix actif + aria-pressed.
+  const setSeg = (seg, activeBtn) => seg.querySelectorAll('button').forEach(x => { const on = x === activeBtn; x.classList.toggle('active', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+
   // Retour sur l'onglet : mise à jour immédiate, sauf si la liste vient d'être rafraîchie.
   document.addEventListener('visibilitychange', ()=>{ if (!document.hidden && timer && Date.now() - lastRefreshAt > 5000) refreshAll(false); });
 
@@ -639,12 +674,12 @@
 
   $('whenSeg').addEventListener('click',(e)=>{ const b=e.target.closest('button'); if(!b)return;
     when=b.dataset.when;
-    $('whenSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));
+    setSeg($('whenSeg'), b);
     $('schedWrap').classList.toggle('hidden', when!=='scheduled');
   });
   $('modeSeg').addEventListener('click',(e)=>{ const b=e.target.closest('button'); if(!b)return;
     mode=b.dataset.mode;
-    $('modeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));
+    setSeg($('modeSeg'), b);
     const free=mode==='free';
     $('distWrap').classList.toggle('hidden', !free);
     $('fixedWrap').classList.toggle('hidden', free);
@@ -837,8 +872,11 @@
         else if(b.status==='PENDING'||b.status==='CONFIRMED'){
           const opts=assignOptions(b.needsWheelchairVehicle);
           action = opts.length
-            ? `<div class="assign"><button class="assignbtn" data-action="toggle">Affecter un chauffeur</button>
-                 <div class="assign-box hidden"><select class="assign-select">${opts.join('')}</select><button class="assign-confirm" data-action="confirm">OK</button></div></div>`
+            ? `<div class="assign"><button class="assignbtn tgl" type="button" data-action="toggle" aria-pressed="false" title="Ouvrir le panneau « Affecter un chauffeur »"><span class="tgl-ico" aria-hidden="true">▾</span><span>Affecter un chauffeur</span></button>
+                 <div class="assign-box hidden" role="group" aria-label="Affecter un chauffeur">
+                   <div class="assign-head"><span class="assign-title">Affecter un chauffeur et un véhicule</span><button class="closebtn" type="button" data-action="toggle">Fermer</button></div>
+                   <div class="assign-row"><select class="assign-select" aria-label="Chauffeur et véhicule">${opts.join('')}</select><button class="assign-confirm" data-action="confirm">OK</button></div>
+                 </div></div>`
             : `<div class="assign-none">${b.needsWheelchairVehicle?'Aucun véhicule adapté disponible':'Aucun chauffeur disponible'} — ajoute via « + Flotte ».</div>`;
         }
         return `<div class="qcard" data-id="${esc(b.id)}">
@@ -863,7 +901,13 @@
   });
 
   async function runAction(btn, card, id, act){
-    if(act==='toggle'){ card.querySelector('.assign-box').classList.toggle('hidden'); return; }
+    if(act==='toggle'){   // « Affecter un chauffeur » et le « Fermer » de son panneau : même état, même bouton
+      const box=card.querySelector('.assign-box'), open=box.classList.contains('hidden'), tb=card.querySelector('.assign > .assignbtn');
+      box.classList.toggle('hidden', !open);
+      tb.setAttribute('aria-pressed', open?'true':'false'); tb.querySelector('.tgl-ico').textContent = open?'✕':'▾';
+      tb.title = (open?'Fermer':'Ouvrir')+' le panneau « Affecter un chauffeur »';
+      if(!open) tb.focus();
+      return; }
     if(act==='manual'){ openManualDialog(id); return; }
     if(act==='void'){ openVoidDialog(btn.dataset.payment); return; }
     if(act==='refund'){ openRefundDialog(btn.dataset.payment); return; }
@@ -1164,14 +1208,14 @@
     const manager = isManager(), nc = lastToCollect.length, nr = lastToRefund.length, n = nc + nr;
     $('refundToggle').classList.toggle('hidden', !manager);
     const c = $('refundCount'); c.textContent = String(n); c.classList.toggle('hidden', n === 0);
-    if (!manager) { $('refundPanel').classList.add('hidden'); return; }
+    if (!manager) { setPanel('refundPanel', false); return; }
     $('refundList').innerHTML =
       `<div class="sectitle">À encaisser (${nc})</div>` +
       (nc ? `<p class="help" style="margin:0 0 4px;">Courses non payées : départ autorisé par dérogation, ou terminées sans dérogation. Elles restent ici jusqu'au paiement.</p>${lastToCollect.map(collectRow).join('')}` : '<div class="empty">Rien à encaisser.</div>') +
       `<div class="sectitle" style="margin-top:14px;">À rembourser (${nr})</div>` +
       (nr ? `<p class="help" style="margin:0 0 4px;">Argent reçu à rendre au client (double paiement, course annulée). Le remboursement se fait hors de l'application, puis se marque ici.</p>${lastToRefund.map(refundRow).join('')}` : '<div class="empty">Rien à rembourser.</div>');
   }
-  $('refundToggle').addEventListener('click', ()=>$('refundPanel').classList.toggle('hidden'));
+  $('refundToggle').addEventListener('click', ()=>togglePanel('refundPanel'));
   $('refundList').addEventListener('click', async (e)=>{
     const rb = e.target.closest('[data-refund]'); if (rb) { openRefundDialog(rb.dataset.refund); return; }
     const btn = e.target.closest('[data-action]'); if (!btn) return;
@@ -1483,13 +1527,13 @@
     $('accompaniment').checked=false;
     estimate=null; $('viaToll').checked=false; $('measured').classList.add('hidden'); $('tollWrap').classList.add('hidden');
     $('calcBtn').textContent='Calculer le prix (carte)';
-    mode='free'; $('modeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x.dataset.mode==='free'));
+    mode='free'; setSeg($('modeSeg'), $('modeSeg').querySelector('[data-mode="free"]'));
     $('distWrap').classList.remove('hidden'); $('fixedWrap').classList.add('hidden');
     emptyQuote('Renseigne le trajet et le service pour voir le tarif.');
   }
 
   // Flotte : ajouter un chauffeur + son véhicule
-  $('fleetToggle').addEventListener('click',()=>$('fleetPanel').classList.toggle('hidden'));
+  $('fleetToggle').addEventListener('click',()=>togglePanel('fleetPanel'));
   function setFleetMsg(t,k){ const m=$('fleetMsg'); m.textContent=t; m.className='formmsg '+(k||''); }
   async function addFleet(){
     const name=$('fName').value.trim(), phone=$('fPhone').value.trim(), reg=$('fReg').value.trim();
