@@ -53,7 +53,7 @@ Tests conservés, sans base de données ni serveur (quelques secondes) :
 npm test                  # tarification + données sensibles + interface
 npm run test:pricing      # moteur de tarification (12 cas)
 npm run test:sensitive    # aucune réponse ne doit contenir passwordHash (voir « Données sensibles »)
-npm run test:console      # règle d'interface : boutons de panneau (voir « Console opérateur »)
+npm run test:console      # règles d'interface de la console (16 contrôles, voir « Console opérateur »)
 ```
 
 > Note : `prisma generate` télécharge un moteur natif depuis
@@ -72,20 +72,36 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
 - **Rafraîchissement automatique** de la liste des courses toutes les 20 s
   (« Mis à jour à… »). Il maintient aussi la session ouverte tant que la console
   l'est : un opérateur en service n'est jamais déconnecté pour inactivité.
+- **Mise en page** : la colonne « Courses à venir » est l'espace de travail principal. Le
+  formulaire garde une largeur fixe (≈ 460 px) et la file prend tout le reste, jusqu'à 1800 px
+  de large en tout (1366 px : file ≈ 840 px ; 1920 px : file ≈ 1270 px). Quand la file dépasse
+  900 px, chaque carte passe sur deux colonnes (course et affectation à gauche, paiement à
+  droite). En-tête de la file : le titre, « Mis à jour à… » dessous, et les boutons
+  (« À régler », « + Flotte », « Actualiser ») à droite, qui passent sur une ligne à part quand
+  la place manque, sans jamais déborder. **Un seul panneau ouvert à la fois** parmi « À régler »
+  et « Flotte » : ouvrir l'un ferme l'autre.
 - **Nouvelle réservation** : passager, trajet libre (prix calculé depuis les deux
   adresses via Google Maps, péage compris) ou prix fixe, horaire, accessibilité.
+  Le **motif du déplacement** n'a pas de valeur par défaut : le choix est obligatoire.
 - **Courses à venir** : file de dispatch et affectation d'un chauffeur (possible
-  tant que la course n'est pas partie).
-- **Boutons de statut** sur chaque course : **En route** (chauffeur affecté
-  obligatoire), **Terminée**, **Client absent**, **Annulée…** (motif obligatoire).
-  Seuls les boutons permis par l'état de la course sont proposés ; Terminée,
-  Annulée et Client absent sont définitifs.
+  tant que la course n'est pas partie). Une course sans chauffeur porte le statut
+  **« À AFFECTER »** (et non « En attente », qui prêtait à confusion avec un paiement en attente).
+- **Boutons de statut** sur chaque course, avec des verbes : **Passer en route** (chauffeur
+  affecté obligatoire), **Terminer la course**, **Client absent…**, **Changer de chauffeur…**.
+  Seuls les boutons permis par l'état de la course sont proposés ; Terminée, Annulée et
+  Client absent sont définitifs. **Une seule action principale** est mise en avant selon l'état
+  (contour marqué ou fond plein) : « Affecter un chauffeur » pour une course à affecter,
+  « Créer le lien de paiement » pour une course affectée non payée, « Terminer la course »
+  quand elle est en route. **« Annuler la course… »** est un lien discret, tout en bas de la
+  carte, loin des actions courantes (motif obligatoire).
 - **Changer de chauffeur…** (tout le personnel) sur une course **en route** ou **en cours** :
   panne, incident. Choix du nouveau chauffeur et de son véhicule, motif obligatoire.
   La course garde son statut, son paiement et son prix ; l'historique des changements
   s'affiche sur la carte de la course.
-- **Paiement** : « Lien de paiement » par course (affichage, copie, envoi par
-  WhatsApp au proche ou, à défaut, au passager), badge **Payé**, et
+- **Paiement** : « Créer le lien de paiement » par course, puis **« Copier le lien »** (le lien
+  complet va dans le presse-papiers, il n'est jamais affiché en entier sur la carte) et
+  **« Envoyer par WhatsApp »** (au proche ou, à défaut, au passager), badge **Payé**
+  (« Paiement reçu ✓ · PayDunya », sans seconde ligne qui répète le moyen), et
   « Vérifier le paiement » si la notification n'est pas arrivée.
 - **Une course non payée ne part pas** : le chauffeur peut être affecté à l'avance,
   mais la course affiche « En attente de paiement, départ bloqué » et l'API refuse
@@ -106,18 +122,23 @@ servie par l'API et appelle celle-ci en adresse relative (`/api`).
   - **À rembourser** : les doubles paiements PayDunya et l'argent reçu pour une course
     **annulée**. Rien n'est remboursé automatiquement : un admin marque le
     remboursement une fois fait à la main.
-- **Tarifs** (admins, bouton dans la barre du haut) : tous les paramètres des trajets libres,
-  aperçu avant / après, motif obligatoire, historique des versions (voir « Tarifs des
-  trajets libres »), et section « Corridors à prix fixe » : créer, modifier les prix,
-  désactiver ou réactiver un corridor, consulter son historique (voir « Corridors à prix
-  fixe »).
+  - Les textes d'explication du panneau sont en petit et discrets (plus petits que les courses).
+- **Tarifs** (admins, bouton dans la barre du haut ; fenêtre fermable par le **✕** en haut à
+  droite) : tous les paramètres des trajets libres, aperçu avant / après, motif obligatoire,
+  historique des versions (voir « Tarifs des trajets libres »), et section « Corridors à prix
+  fixe », **repliée par défaut** et marquée « Non utilisés pour les réservations pour
+  l'instant » : créer, modifier les prix, désactiver ou réactiver un corridor, consulter son
+  historique (voir « Corridors à prix fixe »). Les noms s'affichent avec **↔** (« Dakar ↔ AIBD »).
 - **Flotte** : ajout d'un chauffeur avec son véhicule.
 - **Boutons qui ouvrent un panneau** (« À régler », « + Flotte », « Affecter un chauffeur ») :
   quand le panneau est ouvert, le bouton est **en fond plein** (couleur différente), son icône
   devient **✕** (fermer) et son infobulle dit « Fermer le panneau… » ; il porte `aria-pressed`.
   Le panneau a un **titre** clair et un bouton **« Fermer »**, qui rend le focus au bouton. Les
   choix exclusifs (Trajet libre / Prix fixe, Dès que possible / Planifier) portent aussi
-  `aria-pressed`. Même règle pour tout futur bouton de ce type (contrôlée par `npm run test:console`).
+  `aria-pressed`. Même règle pour tout futur bouton de ce type (contrôlée par `npm run test:console`,
+  qui vérifie aussi la mise en page, l'exclusivité des panneaux, les verbes des boutons, « À affecter »,
+  l'absence du lien PayDunya sur les cartes, les corridors repliés, le ✕ de Tarifs et le motif sans
+  valeur par défaut).
 
 ---
 
